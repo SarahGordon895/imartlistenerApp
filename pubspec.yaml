@@ -1,0 +1,48 @@
+name: vll_sms
+description: Victoria Lush VLL SMS (rebuilt from alpha APK; matches tz.co.victorialush.vllsms).
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  http: ^1.2.2
+  shared_preferences: ^2.3.2
+  permission_handler: ^11.3.1
+  fluttertoast: ^9.0.0
+  readsms: ^0.2.0+4
+  sqflite: ^2.3.3
+  path: ^1.9.0
+  flutter_local_notifications: ^17.2.3
+  sqflite_common_ffi: ^2.3.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  # Dark Victoria Lush mark (cropped from brand strip) — same family as web favicon.
+  image_path: assets/vll-app-icon.png
+  adaptive_icon_background: "#1A1A1A"
+  adaptive_icon_foreground: assets/vll-app-icon.png
+  remove_alpha_ios: true
+  android: true
+  ios: true
+  web:
+    generate: true
+  windows:
+    generate: true
+  macos:
+    generate: true
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/vll-logo.png
+    - assets/vll-logo-white.png

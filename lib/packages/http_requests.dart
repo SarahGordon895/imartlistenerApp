@@ -1,0 +1,299 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../shared/constants.dart';
+
+typedef JsonMap = Map<String, dynamic>;
+
+class ApiClient {
+  ApiClient._();
+
+  static final ApiClient instance = ApiClient._();
+  /// Slow shared hosting / first cold DB hit after login: allow extra headroom.
+  static const Duration _requestTimeout = Duration(seconds: 45);
+
+  static const _tokenKey = 'auth_token';
+  static const _baseUrlKey = 'api_base_url';
+  static const _legacyTokenKey = 'auth_token_legacy';
+
+  /// Laravel host only (no `/api` or `/api/v1`). Paths in [ApiConstants] already include `/api/v1/...`.
+  static String normalizeApiBaseUrl(String url) {
+    var u = url.trim().replaceAll(RegExp(r'/+$'), '');
+    while (true) {
+      final l = u.toLowerCase();
+      if (l.endsWith('/api/v1')) {
+        u = u.substring(0, u.length - '/api/v1'.length);
+      } else if (l.endsWith('/api')) {
+        u = u.substring(0, u.length - '/api'.length);
+      } else {
+        break;
+      }
+      u = u.replaceAll(RegExp(r'/+$'), '');
+    }
+    return u;
+  }
+
+  Future<String> getBaseUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_baseUrlKey)?.trim();
+    if (saved != null && saved.isNotEmpty) {
+      if (saved.contains('dev.victorialush.co.tz')) {
+        return normalizeApiBaseUrl(ApiConstants.baseUrl);
+      }
+      return normalizeApiBaseUrl(saved);
+    }
+    return normalizeApiBaseUrl(ApiConstants.baseUrl);
+  }
+
+  Future<void> setBaseUrl(String url) async {
+    final prefs = await SharedPreferences.getInstance();
+    final normalized = normalizeApiBaseUrl(url);
+    await prefs.setString(_baseUrlKey, normalized);
+  }
+
+  Future<String?> getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final direct = prefs.getString(_tokenKey);
+    if (direct != null && direct.isNotEmpty) {
+      return direct;
+    }
+    // One-time migration from older keys / pre–desktop-login storage layout.
+    final legacy = prefs.getString(_legacyTokenKey);
+    if (legacy != null && legacy.isNotEmpty) {
+      await prefs.setString(_tokenKey, legacy);
+      await prefs.remove(_legacyTokenKey);
+      return legacy;
+    }
+    return null;
+  }
+
+  Future<void> setToken(String? token) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (token == null || token.isEmpty) {
+      await prefs.remove(_tokenKey);
+      await prefs.remove(_legacyTokenKey);
+    } else {
+      await prefs.setString(_tokenKey, token);
+      await prefs.remove(_legacyTokenKey);
+    }
+  }
+
+  Future<Uri> uri(String path) async {
+    final base = await getBaseUrl();
+    final p = path.startsWith('/') ? path : '/$path';
+    return Uri.parse('$base$p');
+  }
+
+  Future<Map<String, String>> _headers({bool jsonBody = false}) async {
+    final headers = <String, String>{
+      'Accept': 'application/json',
+    };
+    if (jsonBody) {
+      headers['Content-Type'] = 'application/json';
+    }
+    final token = await getToken();
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    return headers;
+  }
+
+  Future<http.Response> postJson(String path, JsonMap body) async {
+    final res = await http
+        .post(
+          await uri(path),
+          headers: await _headers(jsonBody: true),
+          body: jsonEncode(body),
+        )
+        .timeout(_requestTimeout, onTimeout: () => throw _timeout(path));
+    return res;
+  }
+
+  Future<http.Response> putJson(String path, JsonMap body) async {
+    final res = await http
+        .put(
+          await uri(path),
+          headers: await _headers(jsonBody: true),
+          body: jsonEncode(body),
+        )
+        .timeout(_requestTimeout, onTimeout: () => throw _timeout(path));
+    return res;
+  }
+
+  Future<http.Response> postForm(
+      String path, Map<String, String> fields) async {
+    final res = await http
+        .post(
+          await uri(path),
+          headers: await _headers(jsonBody: false),
+          body: fields,
+        )
+        .timeout(_requestTimeout, onTimeout: () => throw _timeout(path));
+    return res;
+  }
+
+  Future<http.Response> get(String path, {Map<String, String>? query}) async {
+    final u = await uri(path);
+    final withQuery =
+        query == null || query.isEmpty ? u : u.replace(queryParameters: query);
+    return http
+        .get(withQuery, headers: await _headers())
+        .timeout(_requestTimeout, onTimeout: () => throw _timeout(path));
+  }
+
+  Future<http.Response> patchJson(String path, JsonMap body) async {
+    final res = await http
+        .patch(
+          await uri(path),
+          headers: await _headers(jsonBody: true),
+          body: jsonEncode(body),
+        )
+        .timeout(_requestTimeout, onTimeout: () => throw _timeout(path));
+    return res;
+  }
+
+  Future<http.Response> delete(String path) async {
+    return http
+        .delete(await uri(path), headers: await _headers())
+        .timeout(_requestTimeout, onTimeout: () => throw _timeout(path));
+  }
+
+  TimeoutException _timeout(String path) {
+    return TimeoutException(
+      'Request timed out. Check internet/server and try again. Endpoint: $path',
+    );
+  }
+
+  static Object? decodeBody(http.Response response) {
+    final raw = response.body.trim();
+    if (raw.isEmpty) return null;
+    try {
+      return jsonDecode(raw);
+    } catch (_) {
+      return raw;
+    }
+  }
+
+  /// Laravel standard envelope: `{ success, message, data }`.
+  static bool isSuccess(http.Response response) {
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      return false;
+    }
+    final decoded = decodeBody(response);
+    if (decoded is Map) {
+      final s = decoded['success'];
+      if (s is bool) return s;
+    }
+    return true;
+  }
+
+  /// Throws [Exception] when HTTP status is not 2xx or JSON `success` is false (Laravel envelope).
+  static void ensureHttpAndEnvelopeSuccess(
+    http.Response response, {
+    String fallbackPrefix = 'Request failed',
+  }) {
+    if (!isSuccess(response)) {
+      throw Exception(errorMessageFromResponse(
+        response,
+        fallbackPrefix: fallbackPrefix,
+      ));
+    }
+  }
+
+  static dynamic responseData(http.Response response) {
+    final decoded = decodeBody(response);
+    if (decoded is Map && decoded['data'] != null) {
+      return decoded['data'];
+    }
+    return decoded;
+  }
+
+  /// `Retry-After` header when sent as seconds (typical for Laravel throttle). Web-safe (no `dart:io`).
+  static int? parseRetryAfterSeconds(http.Response response) {
+    final ra = response.headers['retry-after']?.trim();
+    if (ra == null || ra.isEmpty) return null;
+    final asInt = int.tryParse(ra);
+    if (asInt != null) {
+      return asInt.clamp(1, 120);
+    }
+    return null;
+  }
+
+  static String errorMessageFromResponse(
+    http.Response response, {
+    String fallbackPrefix = 'Request failed',
+  }) {
+    if (response.statusCode == 429) {
+      final decoded = decodeBody(response);
+      if (decoded is Map) {
+        final map = Map<String, dynamic>.from(decoded);
+        final direct = map['message'] ?? map['error'];
+        if (direct is String && direct.trim().isNotEmpty) {
+          return direct.trim();
+        }
+      }
+      final ra = response.headers['retry-after']?.trim();
+      if (ra != null && ra.isNotEmpty) {
+        return 'Too many requests. Retry after $ra second(s).';
+      }
+      return 'Too many requests. Wait a minute, then try again.';
+    }
+
+    final sc = response.statusCode;
+    if (sc == 502 || sc == 503 || sc == 504) {
+      final decodedGateway = decodeBody(response);
+      if (decodedGateway is Map) {
+        final map = Map<String, dynamic>.from(decodedGateway);
+        final direct = map['message'] ?? map['error'];
+        if (direct is String && direct.trim().isNotEmpty) {
+          return direct.trim();
+        }
+      }
+      if (sc == 504) {
+        return 'Server timed out. Try again in a moment.';
+      }
+      if (sc == 502) {
+        return 'Bad gateway. The API may be restarting — retry shortly.';
+      }
+      return 'Service temporarily unavailable. Try again shortly.';
+    }
+
+    final decoded = decodeBody(response);
+    if (decoded is String && decoded.isNotEmpty) {
+      return decoded;
+    }
+    if (decoded is Map) {
+      final map = Map<String, dynamic>.from(decoded);
+      final direct = map['message'] ?? map['error'];
+      if (direct is String && direct.trim().isNotEmpty) {
+        return direct.trim();
+      }
+
+      final errors = map['errors'];
+      if (errors is List && errors.isNotEmpty) {
+        final first = errors.first;
+        if (first is String && first.trim().isNotEmpty) return first.trim();
+        return first.toString();
+      }
+      if (errors is Map) {
+        for (final value in errors.values) {
+          if (value is List && value.isNotEmpty) {
+            final first = value.first;
+            if (first is String && first.trim().isNotEmpty) return first.trim();
+            return first.toString();
+          }
+          if (value is String && value.trim().isNotEmpty) return value.trim();
+        }
+      }
+    }
+
+    final reason = response.reasonPhrase?.trim();
+    if (reason != null && reason.isNotEmpty) {
+      return '$fallbackPrefix (${response.statusCode}): $reason';
+    }
+    return '$fallbackPrefix (${response.statusCode})';
+  }
+}
