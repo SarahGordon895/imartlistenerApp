@@ -2,14 +2,16 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'packages/http_requests.dart';
 import 'shared/branding.dart';
 import 'shared/root_messenger.dart';
 import 'shared/themes.dart';
 import 'wrapper.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   _initSqfliteForDesktop();
+  await ApiClient.instance.ensureProductionApiBase();
   runApp(const VllSmsApp());
 }
 

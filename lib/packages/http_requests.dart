@@ -18,6 +18,7 @@ class ApiClient {
   static const _tokenKey = 'auth_token';
   static const _baseUrlKey = 'api_base_url';
   static const _legacyTokenKey = 'auth_token_legacy';
+  static const String productionBaseUrl = 'https://sms.victorialush.co.tz';
 
   /// Laravel host only (no `/api` or `/api/v1`). Paths in [ApiConstants] already include `/api/v1/...`.
   static String normalizeApiBaseUrl(String url) {
@@ -36,16 +37,40 @@ class ApiClient {
     return u;
   }
 
+  bool _isUnreachableSavedBase(String url) {
+    final lower = url.toLowerCase();
+    if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
+      return true;
+    }
+    return lower.contains('127.0.0.1') ||
+        lower.contains('localhost') ||
+        lower.contains('10.0.2.2') ||
+        lower.contains('dev.victorialush.co.tz') ||
+        lower.contains('api.victorialush.co.tz');
+  }
+
   Future<String> getBaseUrl() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString(_baseUrlKey)?.trim();
+    final fallback = normalizeApiBaseUrl(
+      ApiConstants.baseUrl.isNotEmpty
+          ? ApiConstants.baseUrl
+          : productionBaseUrl,
+    );
     if (saved != null && saved.isNotEmpty) {
-      if (saved.contains('dev.victorialush.co.tz')) {
-        return normalizeApiBaseUrl(ApiConstants.baseUrl);
+      if (_isUnreachableSavedBase(saved)) {
+        await prefs.setString(_baseUrlKey, fallback);
+        return fallback;
       }
       return normalizeApiBaseUrl(saved);
     }
-    return normalizeApiBaseUrl(ApiConstants.baseUrl);
+    await prefs.setString(_baseUrlKey, fallback);
+    return fallback;
+  }
+
+  /// Call on app start so stale dev URLs cannot break production login.
+  Future<void> ensureProductionApiBase() async {
+    await getBaseUrl();
   }
 
   Future<void> setBaseUrl(String url) async {

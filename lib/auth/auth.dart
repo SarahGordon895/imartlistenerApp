@@ -54,9 +54,10 @@ class AuthService {
       throw AuthException(
         'Login request timed out. Check server/network and try again.',
       );
-    } on http.ClientException {
+    } on http.ClientException catch (e) {
+      final base = await _api.getBaseUrl();
       throw AuthException(
-        'Unable to reach auth server. Verify portal URL and backend status.',
+        'Unable to reach auth server at $base. Check internet and try again. (${e.message})',
       );
     } catch (e) {
       throw AuthException('Login failed: $e');

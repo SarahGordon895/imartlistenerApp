@@ -5,7 +5,7 @@
 class ApiConstants {
   static const String baseUrl = String.fromEnvironment(
     'API_BASE',
-    defaultValue: 'http://127.0.0.1:18000',
+    defaultValue: 'https://sms.victorialush.co.tz',
   );
 
   /// SMSver1 users authenticate via Laravel `client/login` (same DB as portal).
