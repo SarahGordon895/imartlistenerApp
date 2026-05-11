@@ -37,6 +37,7 @@ class AuthService {
   Future<String> login({required String login, required String password}) async {
     http.Response res;
     try {
+      await _api.ensureProductionApiBase();
       // Laravel accepts `user_id` (portal field name) or `login` / `username` / `email` aliases.
       res = await _api.postJson(ApiConstants.loginPath, {
         'user_id': login,

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -49,14 +50,20 @@ class ApiClient {
         lower.contains('api.victorialush.co.tz');
   }
 
+  String get _defaultBaseUrl => normalizeApiBaseUrl(
+        ApiConstants.baseUrl.isNotEmpty
+            ? ApiConstants.baseUrl
+            : productionBaseUrl,
+      );
+
   Future<String> getBaseUrl() async {
     final prefs = await SharedPreferences.getInstance();
+    final fallback = _defaultBaseUrl;
+    if (kReleaseMode) {
+      await prefs.setString(_baseUrlKey, fallback);
+      return fallback;
+    }
     final saved = prefs.getString(_baseUrlKey)?.trim();
-    final fallback = normalizeApiBaseUrl(
-      ApiConstants.baseUrl.isNotEmpty
-          ? ApiConstants.baseUrl
-          : productionBaseUrl,
-    );
     if (saved != null && saved.isNotEmpty) {
       if (_isUnreachableSavedBase(saved)) {
         await prefs.setString(_baseUrlKey, fallback);
@@ -70,7 +77,8 @@ class ApiClient {
 
   /// Call on app start so stale dev URLs cannot break production login.
   Future<void> ensureProductionApiBase() async {
-    await getBaseUrl();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_baseUrlKey, _defaultBaseUrl);
   }
 
   Future<void> setBaseUrl(String url) async {
