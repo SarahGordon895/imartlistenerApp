@@ -1,0 +1,22 @@
+// AGP 8+ requires namespace on every Android library. Some pub plugins omit it;
+// derive it from package= in src/main/AndroidManifest.xml when missing.
+subprojects { subproject ->
+    subproject.plugins.withId("com.android.library") {
+        def androidExt = subproject.extensions.findByName("android")
+        if (androidExt == null) {
+            return
+        }
+        def current = androidExt.namespace
+        if (current != null && !current.toString().trim().isEmpty()) {
+            return
+        }
+        def manifestFile = subproject.file("src/main/AndroidManifest.xml")
+        if (!manifestFile.exists()) {
+            return
+        }
+        def m = (manifestFile.getText("UTF-8") =~ /package="([^"]+)"/)
+        if (m.find()) {
+            androidExt.namespace = m.group(1)
+        }
+    }
+}

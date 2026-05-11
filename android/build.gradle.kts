@@ -1,3 +1,6 @@
+// Workaround for pub plugins without `namespace` (e.g. readsms) on AGP 8+.
+apply(from = "autofill_plugin_namespace.gradle")
+
 allprojects {
     repositories {
         google()

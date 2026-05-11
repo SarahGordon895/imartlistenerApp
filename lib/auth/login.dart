@@ -221,10 +221,12 @@ class _LoginPageState extends State<LoginPage> {
                                         autofillHints: const [AutofillHints.username],
                                         decoration: const InputDecoration(
                                           border: OutlineInputBorder(),
-                                          labelText: 'Username',
+                                          labelText: 'Username, user ID, or email',
                                         ),
-                                        validator: (v) =>
-                                            Validators.required(v, 'Username'),
+                                        validator: (v) => Validators.required(
+                                          v,
+                                          'Username, user ID, or email',
+                                        ),
                                       ),
                                       const SizedBox(height: 12),
                                       TextFormField(
