@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/inbound_sync_service.dart';
-import '../services/listening_notification.dart';
+import '../services/sms_inbound_listener.dart';
 import 'compose_screen.dart';
 import 'dashboard_tab.dart';
 import 'incoming_messages_screen.dart';
@@ -29,6 +29,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     InboundSyncService.instance.startPeriodicRetry();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       InboundSyncService.instance.flushPending();
+      SmsInboundListener.instance.ensureStarted();
     });
   }
 
@@ -36,7 +37,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     InboundSyncService.instance.stopPeriodicRetry();
-    ListeningNotification.instance.dismiss();
+    SmsInboundListener.instance.stop();
     super.dispose();
   }
 

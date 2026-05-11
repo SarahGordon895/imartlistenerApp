@@ -1,7 +1,7 @@
 name: vll_sms
 description: Victoria Lush VLL SMS (rebuilt from alpha APK; matches tz.co.victorialush.vllsms).
 publish_to: "none"
-version: 1.0.3+4
+version: 1.0.4+5
 
 environment:
   sdk: ">=3.3.0 <4.0.0"

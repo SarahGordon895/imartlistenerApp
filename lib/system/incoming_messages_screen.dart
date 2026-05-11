@@ -2,12 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:readsms/readsms.dart';
-
 import '../data/local_database.dart';
-import '../services/inbound_sync_service.dart';
-import '../services/listening_notification.dart';
+import '../services/sms_inbound_listener.dart';
 import '../shared/branding.dart';
 import '../shared/show_segment.dart';
 import 'compose_screen.dart';
@@ -15,8 +11,7 @@ import 'compose_screen.dart';
 class IncomingMessagesScreen extends StatefulWidget {
   const IncomingMessagesScreen({super.key, this.isActive = false});
 
-  /// When false (e.g. user is on Home after login), do not start SMS listen or
-  /// foreground notification — [IndexedStack] builds all tabs eagerly.
+  /// When true, the Inbox tab is visible (used for first-open privacy copy).
   final bool isActive;
 
   @override
@@ -25,18 +20,27 @@ class IncomingMessagesScreen extends StatefulWidget {
 
 class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
   Future<List<Map<String, Object?>>>? _future;
-  Readsms? _readsms;
   String? _listenError;
   bool _privacyShown = false;
-  bool _listenBootstrapStarted = false;
   String? _segmentFilter;
+  StreamSubscription<void>? _messageSub;
+  StreamSubscription<String?>? _errorSub;
 
   @override
   void initState() {
     super.initState();
     _reload();
+    SmsInboundListener.instance.ensureStarted();
+    _listenError = SmsInboundListener.instance.lastError;
+    _messageSub = SmsInboundListener.instance.onMessage.listen((_) {
+      if (mounted) _reload();
+    });
+    _errorSub = SmsInboundListener.instance.onError.listen((err) {
+      if (!mounted) return;
+      setState(() => _listenError = err);
+    });
     if (widget.isActive) {
-      _startListenIfNeeded();
+      _maybeShowPrivacy();
     }
   }
 
@@ -44,14 +48,8 @@ class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
   void didUpdateWidget(IncomingMessagesScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.isActive && !oldWidget.isActive) {
-      _startListenIfNeeded();
+      _maybeShowPrivacy();
     }
-  }
-
-  void _startListenIfNeeded() {
-    if (_listenBootstrapStarted) return;
-    _listenBootstrapStarted = true;
-    _bootstrapListen();
   }
 
   Future<void> _maybeShowPrivacy() async {
@@ -75,44 +73,10 @@ class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
     );
   }
 
-  Future<void> _bootstrapListen() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
-    await _maybeShowPrivacy();
-    if (!mounted) return;
-    final status = await Permission.sms.request();
-    if (!status.isGranted) {
-      setState(() => _listenError = 'SMS permission denied. Inbox cannot listen.');
-      return;
-    }
-    try {
-      await ListeningNotification.instance.showListening();
-      _readsms = Readsms();
-      _readsms!.read();
-      _readsms!.smsStream.listen(
-        (sms) async {
-          await InboundSyncService.instance.onSmsReceived(
-            sender: sms.sender,
-            body: sms.body,
-            timeReceived: sms.timeReceived,
-          );
-          await ListeningNotification.instance.showListenerIncomingSms(
-            from: sms.sender,
-            bodyPreview: sms.body,
-          );
-          if (mounted) _reload();
-        },
-        onError: (e) {
-          if (mounted) setState(() => _listenError = e.toString());
-        },
-      );
-    } catch (e) {
-      if (mounted) setState(() => _listenError = e.toString());
-    }
-  }
-
   @override
   void dispose() {
-    _readsms?.dispose();
+    _messageSub?.cancel();
+    _errorSub?.cancel();
     super.dispose();
   }
 
