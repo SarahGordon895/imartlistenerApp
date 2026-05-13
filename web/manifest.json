@@ -5,7 +5,7 @@
     "display": "standalone",
     "background_color": "#C41E3A",
     "theme_color": "#C41E3A",
-    "description": "Victoria Lush VLL SMS Feedback — inbox sync, auto-replies, polls, audience checks. Bulk SMS via SMSver1 portal.",
+    "description": "Victoria Lush VLL SMS (Flutter app vll_sms) — inbox sync, segment auto-replies, polls & audience checks stored with SMSver1. Bulk SMS stays on the SMSver1 portal.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

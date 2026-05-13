@@ -172,6 +172,33 @@ class _DashboardTabState extends State<DashboardTab> {
     }
   }
 
+  Future<void> _unbindSender() async {
+    setState(() => _working = true);
+    try {
+      final res = await ApiClient.instance.delete(ApiConstants.senderUnbindPath);
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        throw Exception(
+          ApiClient.errorMessageFromResponse(
+            res,
+            fallbackPrefix: 'Unbind failed',
+          ),
+        );
+      }
+      final decoded = ApiClient.decodeBody(res);
+      if (decoded is Map && decoded['success'] == false) {
+        throw Exception(decoded['message']?.toString() ?? 'Unbind rejected');
+      }
+      final msg = ApiClient.successMessageFromResponse(res);
+      showToast(msg ?? 'Sender binding cleared.');
+    } on TimeoutException {
+      showToast('Unbind request timed out. Please try again.', error: true);
+    } catch (e) {
+      showToast(e.toString(), error: true);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
   Future<void> _logout() async {
     setState(() => _working = true);
     var logoutErr = '';
@@ -374,9 +401,10 @@ class _DashboardTabState extends State<DashboardTab> {
                 childrenPadding: const EdgeInsets.only(bottom: 8),
                 children: [
                   _featureLine(context, 'SMS listening & forwarding: real-time capture, authenticated portal sync, background notification (Android).'),
-                  _featureLine(context, 'Social registration check: multi-platform batch checks via API (keys configured server-side).'),
                   _featureLine(context, 'Portal integration: SMSver1 users & sender IDs, login, inbox sync, configurable API URL.'),
-                  _featureLine(context, 'UI: login, dashboard, compose (auto-reply), inbox, polls, audience tools — responsive layouts.'),
+                  _featureLine(context, 'Polls: live tallies on-device, mirrored to Laravel `audience_polls` for SMSver1 reports; create / edit / end / delete from Polls.'),
+                  _featureLine(context, 'Audience: social checks via API with list refresh, edit, and delete (CRUD) on stored rows.'),
+                  _featureLine(context, 'Compose: segment auto-replies with EAT windows (named segments require end time); quick jump to Polls & Audience.'),
                   _featureLine(context, 'Local DB: SQLite for inbox, polls, outbound log, cached sender IDs from portal.'),
                 ],
               ),
@@ -502,35 +530,45 @@ class _DashboardTabState extends State<DashboardTab> {
           const SizedBox(height: 10),
           if (_senderLoading)
             const Center(child: CircularProgressIndicator())
-          else if (_senders.isEmpty)
-            const Text('No sender IDs available for this account.')
           else ...[
-            DropdownButtonFormField<_SenderOption>(
-              // ignore: deprecated_member_use
-              value: _selected,
-              items: _senders
-                  .map(
-                    (e) => DropdownMenuItem(
-                      value: e,
-                      child: Text(e.label, overflow: TextOverflow.ellipsis),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (v) => setState(() => _selected = v),
-              decoration: const InputDecoration(
-                labelText: 'On-air sender ID',
-                helperText: VllBranding.senderListPortalHint,
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: isNarrow ? double.infinity : 220,
-              child: FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.lushRed,
+            if (_senders.isEmpty)
+              const Text('No sender IDs available for this account.')
+            else ...[
+              DropdownButtonFormField<_SenderOption>(
+                // ignore: deprecated_member_use
+                value: _selected,
+                items: _senders
+                    .map(
+                      (e) => DropdownMenuItem(
+                        value: e,
+                        child: Text(e.label, overflow: TextOverflow.ellipsis),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) => setState(() => _selected = v),
+                decoration: const InputDecoration(
+                  labelText: 'On-air sender ID',
+                  helperText: VllBranding.senderListPortalHint,
                 ),
-                onPressed: _working ? null : _bindSender,
-                child: const Text('Bind sender ID'),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: isNarrow ? double.infinity : 220,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.lushRed,
+                  ),
+                  onPressed: _working ? null : _bindSender,
+                  child: const Text('Bind sender ID'),
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: _working ? null : _unbindSender,
+                child: const Text('Clear sender binding'),
               ),
             ),
           ],

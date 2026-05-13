@@ -23,7 +23,7 @@ class LocalDatabase {
     final path = p.join(dir, 'vll_sms.db');
     return openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
         await db.execute('''
 CREATE TABLE inbound_messages (
@@ -65,7 +65,9 @@ CREATE TABLE audience_polls (
   opt4 TEXT NOT NULL DEFAULT '',
   started_at INTEGER NOT NULL,
   ended_at INTEGER,
-  active INTEGER NOT NULL DEFAULT 1
+  active INTEGER NOT NULL DEFAULT 1,
+  server_poll_id INTEGER,
+  sync_error TEXT
 );
 ''');
         await db.execute('''
@@ -108,6 +110,16 @@ CREATE TABLE IF NOT EXISTS portal_senders (
   synced_at INTEGER NOT NULL
 );
 ''');
+        }
+        if (oldVersion < 5) {
+          try {
+            await db.execute(
+                'ALTER TABLE audience_polls ADD COLUMN server_poll_id INTEGER');
+          } catch (_) {}
+          try {
+            await db.execute(
+                'ALTER TABLE audience_polls ADD COLUMN sync_error TEXT');
+          } catch (_) {}
         }
       },
     );
@@ -366,6 +378,59 @@ WHERE id = ?
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  Future<int?> getPollServerId(int localId) async {
+    final row = await getPoll(localId);
+    if (row == null) return null;
+    final v = row['server_poll_id'];
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return null;
+  }
+
+  Future<void> setPollServerSync(int localId,
+      {int? serverId, String? syncError}) async {
+    final db = await database;
+    final existing = await getPoll(localId);
+    if (existing == null) return;
+    await db.update(
+      'audience_polls',
+      {
+        'server_poll_id': serverId ?? existing['server_poll_id'],
+        'sync_error': syncError,
+      },
+      where: 'id = ?',
+      whereArgs: [localId],
+    );
+  }
+
+  Future<void> updatePollContent({
+    required int id,
+    required String title,
+    required String opt1,
+    required String opt2,
+    String opt3 = '',
+    String opt4 = '',
+  }) async {
+    final db = await database;
+    await db.update(
+      'audience_polls',
+      {
+        'title': title,
+        'opt1': opt1,
+        'opt2': opt2,
+        'opt3': opt3,
+        'opt4': opt4,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> deletePoll(int id) async {
+    final db = await database;
+    await db.delete('audience_polls', where: 'id = ?', whereArgs: [id]);
   }
 
   /// Tallies votes from [inbound_messages] during poll window. Listeners text `1`–`4` or `vote 1`.

@@ -189,7 +189,7 @@ class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
               padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: Text(
                 'Messages are read from this phone’s SMS app, validated against your portal sender binding, '
-                'and stored in the shared incoming log. Open Compose to manage segment auto-replies (FastHub queue).',
+                'and stored in the shared incoming log. Open the Compose tab in VLL SMS to manage segment auto-replies.',
                 style: TextStyle(fontSize: 12),
               ),
             ),

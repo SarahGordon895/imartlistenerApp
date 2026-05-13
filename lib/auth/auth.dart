@@ -37,14 +37,19 @@ class AuthService {
   Future<String> login({required String login, required String password}) async {
     http.Response res;
     try {
-      await _api.ensureProductionApiBase();
+      // API base is chosen in [ApiClient.getBaseUrl]; release default is enforced in [main] via [ensureProductionApiBase].
       // Laravel accepts `user_id` (portal field name) or `login` / `username` / `email` aliases.
       res = await _api.postJson(ApiConstants.loginPath, {
         'user_id': login,
         'login': login,
         'password': password,
       });
-      if (!_ok(res) && res.statusCode != 429) {
+      final firstDecoded = ApiClient.decodeBody(res);
+      final retryForm = (<int>[500, 502, 503, 504, 415, 405].contains(res.statusCode) ||
+              (_ok(res) &&
+                  (firstDecoded is String || firstDecoded == null))) &&
+          res.statusCode != 429;
+      if (retryForm) {
         res = await _api.postForm(ApiConstants.loginPath, {
           'user_id': login,
           'login': login,
@@ -64,7 +69,7 @@ class AuthService {
       throw AuthException('Login failed: $e');
     }
 
-    if (!_ok(res)) {
+    if (!ApiClient.isSuccess(res)) {
       throw AuthException(ApiClient.errorMessageFromResponse(res));
     }
     final decoded = ApiClient.decodeBody(res);

@@ -43,11 +43,10 @@ class ApiClient {
     if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
       return true;
     }
+    // Only treat obvious local/dev loopback hosts as invalid for production builds.
     return lower.contains('127.0.0.1') ||
         lower.contains('localhost') ||
-        lower.contains('10.0.2.2') ||
-        lower.contains('dev.victorialush.co.tz') ||
-        lower.contains('api.victorialush.co.tz');
+        lower.contains('10.0.2.2');
   }
 
   String get _defaultBaseUrl => normalizeApiBaseUrl(
@@ -60,6 +59,12 @@ class ApiClient {
     final prefs = await SharedPreferences.getInstance();
     final fallback = _defaultBaseUrl;
     if (kReleaseMode) {
+      final saved = prefs.getString(_baseUrlKey)?.trim();
+      if (saved != null &&
+          saved.isNotEmpty &&
+          !_isUnreachableSavedBase(saved)) {
+        return normalizeApiBaseUrl(saved);
+      }
       await prefs.setString(_baseUrlKey, fallback);
       return fallback;
     }
@@ -75,10 +80,17 @@ class ApiClient {
     return fallback;
   }
 
-  /// Call on app start so stale dev URLs cannot break production login.
+  /// In **release** builds only: seed the API host from compile-time default when nothing valid is saved.
+  /// Does not overwrite a user-set production API URL (logo → PIN → API server).
   Future<void> ensureProductionApiBase() async {
+    if (!kReleaseMode) {
+      return;
+    }
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_baseUrlKey, _defaultBaseUrl);
+    final saved = prefs.getString(_baseUrlKey)?.trim();
+    if (saved == null || saved.isEmpty || _isUnreachableSavedBase(saved)) {
+      await prefs.setString(_baseUrlKey, _defaultBaseUrl);
+    }
   }
 
   Future<void> setBaseUrl(String url) async {
@@ -216,11 +228,26 @@ class ApiClient {
       return false;
     }
     final decoded = decodeBody(response);
+    // Wrong host / proxy HTML error pages sometimes return 200 with a non-JSON body.
+    if (decoded == null || decoded is String) {
+      return false;
+    }
     if (decoded is Map) {
       final s = decoded['success'];
       if (s is bool) return s;
     }
     return true;
+  }
+
+  /// `message` from Laravel `{ success, message, data }` when [isSuccess] is true.
+  static String? successMessageFromResponse(http.Response response) {
+    if (!isSuccess(response)) return null;
+    final decoded = decodeBody(response);
+    if (decoded is Map) {
+      final msg = decoded['message'];
+      if (msg is String && msg.trim().isNotEmpty) return msg.trim();
+    }
+    return null;
   }
 
   /// Throws [Exception] when HTTP status is not 2xx or JSON `success` is false (Laravel envelope).
@@ -295,7 +322,19 @@ class ApiClient {
     }
 
     final decoded = decodeBody(response);
+    if (sc >= 200 && sc < 300) {
+      if (decoded is String && decoded.trim().isNotEmpty) {
+        return 'Wrong API URL or a proxy returned HTML instead of JSON. Open API settings and set the Laravel host only.';
+      }
+      if (decoded == null) {
+        return 'Empty response from server. Check API base URL.';
+      }
+    }
     if (decoded is String && decoded.isNotEmpty) {
+      final t = decoded.trimLeft();
+      if (t.startsWith('<!DOCTYPE') || t.startsWith('<html')) {
+        return 'Server returned a web page instead of JSON. Check API base URL.';
+      }
       return decoded;
     }
     if (decoded is Map) {

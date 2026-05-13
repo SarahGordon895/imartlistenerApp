@@ -69,11 +69,14 @@ extension on RadioShowSegment {
   }
 }
 
-/// **Compose** tab: segment auto-replies (time windows) + optional one-off reply from Inbox.
+/// **Compose** tab (VLL SMS / `vll_sms`): segment auto-replies (time windows) + optional one-off reply from Inbox.
 class ComposeScreen extends StatefulWidget {
-  const ComposeScreen({super.key, this.prefillRecipient});
+  const ComposeScreen({super.key, this.prefillRecipient, this.onOpenTab});
 
   final String? prefillRecipient;
+
+  /// Switch main shell tab: 0 Home, 1 Compose, 2 Inbox, 3 Polls, 4 Audience.
+  final void Function(int index)? onOpenTab;
 
   @override
   State<ComposeScreen> createState() => _ComposeScreenState();
@@ -319,6 +322,13 @@ class _ComposeScreenState extends State<ComposeScreen> {
           error: true);
       return;
     }
+    if (_showSegment.apiTag != null && _autoEnd == null) {
+      showToast(
+        'Named show segments need an end time (e.g. 09:00–10:00) so auto-reply stops when the block ends — same rules as SMSver1.',
+        error: true,
+      );
+      return;
+    }
     final msg = _templateMessage.text.trim();
     if (msg.isEmpty) {
       showToast('Enter the template message.', error: true);
@@ -384,7 +394,11 @@ class _ComposeScreenState extends State<ComposeScreen> {
           _templateMessage.clear();
         });
       }
-      showToast('Template removed.');
+      final hint = ApiClient.successMessageFromResponse(res);
+      showToast(
+        hint ??
+            'Template removed here. It stays archived on SMSver1 until an admin purges it.',
+      );
       await _loadAutoReplies();
     } catch (e) {
       showToast(e.toString(), error: true);
@@ -665,13 +679,65 @@ class _ComposeScreenState extends State<ComposeScreen> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Server uses Africa/Nairobi (EAT), 24-hour times — same as your SMS portal.',
+                        'Africa/Nairobi (EAT), 24-hour times — same as SMSver1. '
+                        'The incoming message time must fall inside your start–end window and match the show segment label for this reply to send.',
                         style: Theme.of(context)
                             .textTheme
                             .bodySmall
                             ?.copyWith(color: Colors.black54),
                       ),
                       const SizedBox(height: 8),
+                      if (widget.onOpenTab != null) ...[
+                        Card(
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: const BorderSide(color: Color(0xFFE6E8ED)),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(
+                                  'Audience tools',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleSmall
+                                      ?.copyWith(fontWeight: FontWeight.w700),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Open Polls or Audience (social checks) from here.',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    OutlinedButton.icon(
+                                      onPressed: () =>
+                                          widget.onOpenTab?.call(3),
+                                      icon: const Icon(Icons.how_to_vote_outlined,
+                                          size: 18),
+                                      label: const Text('Polls'),
+                                    ),
+                                    OutlinedButton.icon(
+                                      onPressed: () =>
+                                          widget.onOpenTab?.call(4),
+                                      icon: const Icon(Icons.manage_search_outlined,
+                                          size: 18),
+                                      label: const Text('Audience'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       if (_editingAutoReplyId != null) ...[
                         Align(
                           alignment: Alignment.centerLeft,
@@ -739,7 +805,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
                         )
                       else ...[
                         Text(
-                          'Tap a row to edit; trash icon deletes.',
+                          'Tap a row to edit; trash removes it from the app and archives it on SMSver1.',
                           style: Theme.of(context)
                               .textTheme
                               .bodySmall

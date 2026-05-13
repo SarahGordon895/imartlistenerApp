@@ -3,6 +3,7 @@
 /// Override at compile time:
 /// `flutter run --dart-define=API_BASE=https://your-domain.com`
 class ApiConstants {
+  /// Laravel JSON host only (no `/api` or `/api/v1`). Must serve `/api/v1/...` as JSON; if the SMS portal host returns HTML for those paths, set API_BASE to your Laravel host.
   static const String baseUrl = String.fromEnvironment(
     'API_BASE',
     defaultValue: 'https://sms.victorialush.co.tz',
@@ -16,7 +17,12 @@ class ApiConstants {
   /// Same sender rules as SmSver1 (`senders` Active + your `user_id` | Public | Global).
   static const String sendersListPath = '/api/v1/senders/list';
   static const String sendersDebugPath = '/api/v1/senders/list/debug';
+  /// Current bound sender for the logged-in bind phone (GET).
+  static const String senderPointerPath = '/api/v1/sender-pointers';
   static const String senderBindPath = '/api/v1/sender-pointers/bind';
+  /// Same URL as [senderBindPath]; use HTTP DELETE to clear the pointer for the logged-in bind phone.
+  static const String senderUnbindPath = '/api/v1/sender-pointers/bind';
+  /// Victoria Lush **VLL SMS** Flutter client (`vll_sms`); bulk campaigns stay on SMSver1.
   static const String autoReplyListPath = '/api/v1/auto-replies/list';
   static const String autoReplyCreatePath = '/api/v1/auto-replies/create';
   static const String autoReplyUpdatePath = '/api/v1/auto-replies/update';
@@ -35,4 +41,8 @@ class ApiConstants {
   static const String socialCheckPath = '/api/v1/social-checks/check';
   static const String socialBatchPath = '/api/v1/social-checks/batch';
   static const String socialRecentPath = '/api/v1/social-checks/recent';
+  static String socialCheckByIdPath(int id) => '/api/v1/social-checks/$id';
+
+  /// Live polls mirrored to Laravel / SMSver1 (`audience_polls`).
+  static const String pollsPath = '/api/v1/polls';
 }

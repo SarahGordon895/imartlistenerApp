@@ -12,9 +12,9 @@ class Validators {
     return null;
   }
 
+  /// Portal uses MD5 passwords; many legacy accounts are shorter than six characters.
   static String? password(String? v) {
-    if (v == null || v.isEmpty) return 'Enter password';
-    if (v.length < 6) return 'Password is too short.';
+    if (v == null || v.trim().isEmpty) return 'Enter password';
     return null;
   }
 

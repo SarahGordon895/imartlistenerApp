@@ -49,14 +49,24 @@ class _LoginPageState extends State<LoginPage> {
     final saved = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Portal API base URL'),
-        content: TextField(
-          controller: c,
-          decoration: const InputDecoration(
-            labelText: 'Base URL (no trailing slash)',
-            hintText: 'http://127.0.0.1:18000',
-            helperText: 'Laravel host only — do not add /api or /api/v1 (paths are built automatically).',
-          ),
+        title: const Text('API server'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: c,
+              decoration: const InputDecoration(
+                labelText: 'Base URL',
+                hintText: 'https://your-laravel-host.com',
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Use the Laravel host that returns JSON for /api/v1/… (not a URL that serves only the SMS portal HTML).',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
+            ),
+          ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
@@ -205,15 +215,6 @@ class _LoginPageState extends State<LoginPage> {
                                               color: AppTheme.lushDark,
                                             ),
                                       ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        'Sign in with your SMSver1 portal credentials.',
-                                        textAlign: TextAlign.center,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(color: Colors.black54),
-                                      ),
                                       const SizedBox(height: 20),
                                       TextFormField(
                                         controller: _login,
@@ -221,12 +222,9 @@ class _LoginPageState extends State<LoginPage> {
                                         autofillHints: const [AutofillHints.username],
                                         decoration: const InputDecoration(
                                           border: OutlineInputBorder(),
-                                          labelText: 'Username, user ID, or email',
+                                          labelText: 'Username',
                                         ),
-                                        validator: (v) => Validators.required(
-                                          v,
-                                          'Username, user ID, or email',
-                                        ),
+                                        validator: (v) => Validators.required(v, 'Username'),
                                       ),
                                       const SizedBox(height: 12),
                                       TextFormField(

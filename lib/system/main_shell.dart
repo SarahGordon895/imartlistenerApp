@@ -54,7 +54,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final pages = [
       const DashboardTab(),
-      const ComposeScreen(),
+      ComposeScreen(onOpenTab: (i) => setState(() => _index = i)),
       IncomingMessagesScreen(isActive: _index == 2),
       PollsScreen(isActive: _index == 3),
       SocialChecksScreen(isActive: _index == 4),
