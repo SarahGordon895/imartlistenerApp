@@ -318,7 +318,11 @@ class _PollsScreenState extends State<PollsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('${VllBranding.appTitle} · Polls'),
+        title: const Text(
+          '${VllBranding.appTitle} · Polls',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           IconButton(
               onPressed: _loading ? null : _reload, icon: const Icon(Icons.refresh)),

@@ -342,7 +342,11 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('${VllBranding.appTitle} · Audience'),
+        title: const Text(
+          '${VllBranding.appTitle} · Audience',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           IconButton(
             onPressed: _busy ? null : _loadRecent,

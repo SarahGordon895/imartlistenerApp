@@ -139,7 +139,11 @@ class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('${VllBranding.appTitle} · Inbox'),
+        title: const Text(
+          '${VllBranding.appTitle} · Inbox',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           IconButton(
             onPressed: _reload,

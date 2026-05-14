@@ -13,6 +13,7 @@ class AppTheme {
       brightness: Brightness.light,
     );
     return base.copyWith(
+      visualDensity: VisualDensity.adaptivePlatformDensity,
       scaffoldBackgroundColor: const Color(0xFFF7F8FA),
       appBarTheme: const AppBarTheme(
         centerTitle: true,

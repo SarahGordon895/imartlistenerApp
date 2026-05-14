@@ -181,10 +181,22 @@ class _LoginPageState extends State<LoginPage> {
               child: Center(
                 child: GestureDetector(
                   onTap: _onLogoTap,
-                  child: const VllBrandLogo(
-                    tone: VllLogoTone.onBrandField,
-                    height: 56,
-                    width: 260,
+                  child: LayoutBuilder(
+                    builder: (context, c) {
+                      final maxLogo = (c.maxWidth - 8).clamp(160.0, 280.0);
+                      return SizedBox(
+                        width: maxLogo,
+                        height: 60,
+                        child: const FittedBox(
+                          fit: BoxFit.contain,
+                          child: VllBrandLogo(
+                            tone: VllLogoTone.onBrandField,
+                            height: 56,
+                            width: 260,
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),
@@ -223,6 +235,18 @@ class _LoginPageState extends State<LoginPage> {
                                               color: AppTheme.lushDark,
                                             ),
                                       ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        VllBranding.loginSubtitle,
+                                        textAlign: TextAlign.center,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: Colors.black54,
+                                              height: 1.35,
+                                            ),
+                                      ),
                                       const SizedBox(height: 20),
                                       TextFormField(
                                         controller: _login,
@@ -230,7 +254,7 @@ class _LoginPageState extends State<LoginPage> {
                                         autofillHints: const [AutofillHints.username],
                                         decoration: const InputDecoration(
                                           border: OutlineInputBorder(),
-                                          labelText: 'Username',
+                                          labelText: 'Username, user ID, or email',
                                         ),
                                         validator: (v) => Validators.required(v, 'Username'),
                                       ),

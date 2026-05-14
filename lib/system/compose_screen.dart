@@ -475,7 +475,12 @@ class _ComposeScreenState extends State<ComposeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-          title: const Text('${VllBranding.appTitle} · Compose')),
+        title: const Text(
+          '${VllBranding.appTitle} · Compose',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
       body: LayoutBuilder(
         builder: (context, c) {
           final maxW = c.maxWidth > 960 ? 880.0 : c.maxWidth;

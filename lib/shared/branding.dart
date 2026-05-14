@@ -3,6 +3,9 @@ class VllBranding {
   VllBranding._();
 
   static const String appTitle = 'VLL SMS Feedback';
+  /// Shown on the login card under the title.
+  static const String loginSubtitle =
+      'Sign in with your SMSver1 portal credentials (same account as the web SMS portal).';
   /// Full-width Victoria Lush wordmark (transparent) — light surfaces & login.
   static const String logoAsset = 'assets/vll-logo.png';
   /// White / light-glyph treatment for crimson or dark hero backgrounds.

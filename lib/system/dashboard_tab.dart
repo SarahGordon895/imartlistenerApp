@@ -241,21 +241,37 @@ class _DashboardTabState extends State<DashboardTab> {
   }
 
 
+  Future<void> _pullRefresh() async {
+    await _bootstrap();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final wideActions = MediaQuery.sizeOf(context).width >= 420;
     return Scaffold(
       appBar: AppBar(
-        title: const Text(VllBranding.appTitle),
+        title: const Text(
+          VllBranding.appTitle,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           IconButton(
             onPressed: _working ? null : _loadEngagementKpis,
             tooltip: 'Refresh engagement stats',
             icon: const Icon(Icons.analytics_outlined),
           ),
-          TextButton(
-            onPressed: _working ? null : _logout,
-            child: const Text('Logout', style: TextStyle(color: Colors.white)),
-          ),
+          if (wideActions)
+            TextButton(
+              onPressed: _working ? null : _logout,
+              child: const Text('Logout', style: TextStyle(color: Colors.white)),
+            )
+          else
+            IconButton(
+              tooltip: 'Logout',
+              onPressed: _working ? null : _logout,
+              icon: const Icon(Icons.logout),
+            ),
         ],
       ),
       body: LoadingOverlay(
@@ -269,17 +285,21 @@ class _DashboardTabState extends State<DashboardTab> {
             return Center(
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: maxW),
-                child: ListView(
-                  padding: EdgeInsets.fromLTRB(hPad, 12, hPad, 16 + bottomInset),
-                  children: [
-                    _buildHeroCard(context, isNarrow),
-                    const SizedBox(height: 12),
-                    _buildKpiCard(context, isNarrow),
-                    const SizedBox(height: 12),
-                    _buildSenderCard(isNarrow),
-                    const SizedBox(height: 12),
-                    _buildQuickActionsCard(isNarrow),
-                  ],
+                child: RefreshIndicator(
+                  onRefresh: _pullRefresh,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: EdgeInsets.fromLTRB(hPad, 12, hPad, 16 + bottomInset),
+                    children: [
+                      _buildHeroCard(context, isNarrow),
+                      const SizedBox(height: 12),
+                      _buildKpiCard(context, isNarrow),
+                      const SizedBox(height: 12),
+                      _buildSenderCard(isNarrow),
+                      const SizedBox(height: 12),
+                      _buildQuickActionsCard(isNarrow),
+                    ],
+                  ),
                 ),
               ),
             );
