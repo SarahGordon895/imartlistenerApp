@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../packages/http_requests.dart';
 import '../packages/validators.dart';
 import '../shared/branding.dart';
+import '../shared/constants.dart';
 import '../shared/themes.dart';
 import '../widgets/loading.dart';
 import '../widgets/toast.dart';
@@ -77,6 +78,13 @@ class _LoginPageState extends State<LoginPage> {
     if (saved == null || saved.isEmpty) return;
     if (!saved.startsWith('http://') && !saved.startsWith('https://')) {
       showToast('URL must start with http:// or https://', error: true);
+      return;
+    }
+    if (ApiClient.isSmsPortalHostMisusedAsApi(saved)) {
+      showToast(
+        'That host is the SMS web portal, not the Laravel API. Use your JSON API host (e.g. ${ApiConstants.defaultLaravelApiBase}).',
+        error: true,
+      );
       return;
     }
     await ApiClient.instance.setBaseUrl(saved);

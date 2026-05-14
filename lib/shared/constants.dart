@@ -1,12 +1,15 @@
 /// Laravel API base URL (no trailing slash), e.g. `https://api.example.com` or `http://10.0.2.2:8000`.
 /// Paths below include the `/api` prefix.
 /// Override at compile time:
-/// `flutter run --dart-define=API_BASE=https://your-domain.com`
+/// `flutter run --dart-define=API_BASE=https://your-laravel-host.com`
 class ApiConstants {
-  /// Laravel JSON host only (no `/api` or `/api/v1`). Must serve `/api/v1/...` as JSON; if the SMS portal host returns HTML for those paths, set API_BASE to your Laravel host.
+  /// Production Laravel JSON host (NOT `sms.*` — that is SmSver1 PHP and has no `/api/v1/…`).
+  static const String defaultLaravelApiBase = 'https://api.victorialush.co.tz';
+
+  /// Laravel JSON host only (no `/api` or `/api/v1`). Must serve `/api/v1/...` as JSON.
   static const String baseUrl = String.fromEnvironment(
     'API_BASE',
-    defaultValue: 'https://sms.victorialush.co.tz',
+    defaultValue: defaultLaravelApiBase,
   );
 
   /// SMSver1 users authenticate via Laravel `client/login` (same DB as portal).

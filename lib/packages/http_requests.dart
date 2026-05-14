@@ -19,7 +19,9 @@ class ApiClient {
   static const _tokenKey = 'auth_token';
   static const _baseUrlKey = 'api_base_url';
   static const _legacyTokenKey = 'auth_token_legacy';
-  static const String productionBaseUrl = 'https://sms.victorialush.co.tz';
+  /// Same as [ApiConstants.baseUrl] after compile-time `API_BASE` (see [ApiConstants.defaultLaravelApiBase]).
+  static String get productionBaseUrl =>
+      normalizeApiBaseUrl(ApiConstants.baseUrl);
 
   /// Laravel host only (no `/api` or `/api/v1`). Paths in [ApiConstants] already include `/api/v1/...`.
   static String normalizeApiBaseUrl(String url) {
@@ -49,6 +51,16 @@ class ApiClient {
         lower.contains('10.0.2.2');
   }
 
+  /// SmSver1 portal host: serves PHP/HTML, not Laravel `/api/v1/…` (login would 404 as HTML).
+  static bool isSmsPortalHostMisusedAsApi(String url) {
+    try {
+      final host = Uri.parse(url.trim()).host.toLowerCase();
+      return host == 'sms.victorialush.co.tz';
+    } catch (_) {
+      return false;
+    }
+  }
+
   String get _defaultBaseUrl => normalizeApiBaseUrl(
         ApiConstants.baseUrl.isNotEmpty
             ? ApiConstants.baseUrl
@@ -62,7 +74,8 @@ class ApiClient {
       final saved = prefs.getString(_baseUrlKey)?.trim();
       if (saved != null &&
           saved.isNotEmpty &&
-          !_isUnreachableSavedBase(saved)) {
+          !_isUnreachableSavedBase(saved) &&
+          !isSmsPortalHostMisusedAsApi(saved)) {
         return normalizeApiBaseUrl(saved);
       }
       await prefs.setString(_baseUrlKey, fallback);
@@ -70,7 +83,8 @@ class ApiClient {
     }
     final saved = prefs.getString(_baseUrlKey)?.trim();
     if (saved != null && saved.isNotEmpty) {
-      if (_isUnreachableSavedBase(saved)) {
+      if (_isUnreachableSavedBase(saved) ||
+          isSmsPortalHostMisusedAsApi(saved)) {
         await prefs.setString(_baseUrlKey, fallback);
         return fallback;
       }
@@ -88,7 +102,10 @@ class ApiClient {
     }
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString(_baseUrlKey)?.trim();
-    if (saved == null || saved.isEmpty || _isUnreachableSavedBase(saved)) {
+    if (saved == null ||
+        saved.isEmpty ||
+        _isUnreachableSavedBase(saved) ||
+        isSmsPortalHostMisusedAsApi(saved)) {
       await prefs.setString(_baseUrlKey, _defaultBaseUrl);
     }
   }
@@ -96,6 +113,10 @@ class ApiClient {
   Future<void> setBaseUrl(String url) async {
     final prefs = await SharedPreferences.getInstance();
     final normalized = normalizeApiBaseUrl(url);
+    if (isSmsPortalHostMisusedAsApi(normalized)) {
+      await prefs.setString(_baseUrlKey, _defaultBaseUrl);
+      return;
+    }
     await prefs.setString(_baseUrlKey, normalized);
   }
 
@@ -324,16 +345,29 @@ class ApiClient {
     final decoded = decodeBody(response);
     if (sc >= 200 && sc < 300) {
       if (decoded is String && decoded.trim().isNotEmpty) {
-        return 'Wrong API URL or a proxy returned HTML instead of JSON. Open API settings and set the Laravel host only.';
+        return 'Wrong API URL or a proxy returned HTML instead of JSON. Tap the logo five times, enter the admin PIN, and set the Laravel API host (not the SMS web portal).';
       }
       if (decoded == null) {
         return 'Empty response from server. Check API base URL.';
       }
     }
+    if (sc == 404) {
+      if (decoded is String && decoded.isNotEmpty) {
+        final t = decoded.trimLeft();
+        if (t.startsWith('<!DOCTYPE') ||
+            t.startsWith('<html') ||
+            t.toLowerCase().contains('not found')) {
+          return 'Login API not found (404). The app must use your Laravel JSON host (e.g. ${ApiConstants.defaultLaravelApiBase}), not the SMS portal. Tap the logo five times → admin PIN → API server.';
+        }
+      }
+    }
     if (decoded is String && decoded.isNotEmpty) {
       final t = decoded.trimLeft();
       if (t.startsWith('<!DOCTYPE') || t.startsWith('<html')) {
-        return 'Server returned a web page instead of JSON. Check API base URL.';
+        return 'Server returned HTML instead of JSON. Use the Laravel API base URL, not sms.victorialush.co.tz. Tap the logo five times → admin PIN → API server.';
+      }
+      if (t.length > 280) {
+        return '$fallbackPrefix (${response.statusCode}): non-JSON response (truncated). Check API base URL.';
       }
       return decoded;
     }
