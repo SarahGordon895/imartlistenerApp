@@ -30,6 +30,9 @@ class _LoginPageState extends State<LoginPage> {
   bool _busy = false;
   String? _baseUrl;
   int _logoTapCount = 0;
+  bool _healthBusy = false;
+  bool? _healthOk;
+  String? _healthDetail;
 
   late final AuthService _auth = AuthService(ApiClient.instance);
 
@@ -43,6 +46,40 @@ class _LoginPageState extends State<LoginPage> {
     final url = await ApiClient.instance.getBaseUrl();
     if (!mounted) return;
     setState(() => _baseUrl = url);
+    await _probeApiHealth();
+  }
+
+  Future<void> _probeApiHealth() async {
+    if (!mounted) return;
+    setState(() {
+      _healthBusy = true;
+      _healthOk = null;
+      _healthDetail = null;
+    });
+    try {
+      final res = await ApiClient.instance.get(ApiConstants.healthPath);
+      final ok = res.statusCode >= 200 &&
+          res.statusCode < 300 &&
+          ApiClient.isSuccess(res);
+      if (!mounted) return;
+      setState(() {
+        _healthBusy = false;
+        _healthOk = ok;
+        _healthDetail = ok
+            ? null
+            : ApiClient.errorMessageFromResponse(
+                res,
+                fallbackPrefix: 'API check failed',
+              );
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _healthBusy = false;
+        _healthOk = false;
+        _healthDetail = e.toString();
+      });
+    }
   }
 
   Future<void> _showServerDialog() async {
@@ -70,6 +107,37 @@ class _LoginPageState extends State<LoginPage> {
           ],
         ),
         actions: [
+          TextButton(
+            onPressed: () async {
+              final url = c.text.trim();
+              if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                showToast('URL must start with http:// or https://', error: true);
+                return;
+              }
+              if (ApiClient.isSmsPortalHostMisusedAsApi(url)) {
+                showToast(
+                  'That host is the SMS web portal, not the Laravel API.',
+                  error: true,
+                );
+                return;
+              }
+              try {
+                final res = await ApiClient.instance.getHealthAtBase(url);
+                if (!context.mounted) return;
+                if (ApiClient.isSuccess(res)) {
+                  showToast('Laravel API reachable at this URL.');
+                } else {
+                  showToast(
+                    ApiClient.errorMessageFromResponse(res),
+                    error: true,
+                  );
+                }
+              } catch (e) {
+                showToast(e.toString(), error: true);
+              }
+            },
+            child: const Text('Test URL'),
+          ),
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(context, c.text.trim()), child: const Text('Save')),
         ],
@@ -90,6 +158,7 @@ class _LoginPageState extends State<LoginPage> {
     await ApiClient.instance.setBaseUrl(saved);
     if (!mounted) return;
     setState(() => _baseUrl = saved);
+    await _probeApiHealth();
     showToast('Server updated.');
   }
 
@@ -248,6 +317,54 @@ class _LoginPageState extends State<LoginPage> {
                                             ),
                                       ),
                                       const SizedBox(height: 20),
+                                      if (_healthBusy) ...[
+                                        const SizedBox(height: 4),
+                                        const Center(
+                                          child: SizedBox(
+                                            width: 22,
+                                            height: 22,
+                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                          ),
+                                        ),
+                                      ] else if (_healthOk != null) ...[
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Icon(
+                                              _healthOk!
+                                                  ? Icons.cloud_done_outlined
+                                                  : Icons.cloud_off_outlined,
+                                              size: 20,
+                                              color: _healthOk!
+                                                  ? Colors.green.shade700
+                                                  : Colors.orange.shade800,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                _healthOk!
+                                                    ? 'API server reachable (GET /api/v1/health).'
+                                                    : (_healthDetail ??
+                                                        'API not reachable. Tap logo 5× → PIN → API server if the URL is wrong.'),
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .bodySmall
+                                                    ?.copyWith(
+                                                      color: _healthOk!
+                                                          ? Colors.green.shade800
+                                                          : Colors.orange.shade900,
+                                                      height: 1.3,
+                                                    ),
+                                              ),
+                                            ),
+                                            TextButton(
+                                              onPressed: _busy ? null : _probeApiHealth,
+                                              child: const Text('Retry'),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
                                       TextFormField(
                                         controller: _login,
                                         textInputAction: TextInputAction.next,

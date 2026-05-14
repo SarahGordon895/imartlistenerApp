@@ -153,6 +153,28 @@ class ApiClient {
     return Uri.parse('$base$p');
   }
 
+  /// GET [ApiConstants.healthPath] at an explicit base URL (no `Authorization`). Use before saving API prefs.
+  Future<http.Response> getHealthAtBase(String rawBaseUrl) async {
+    final base = normalizeApiBaseUrl(rawBaseUrl.trim());
+    if (base.isEmpty ||
+        (!base.startsWith('http://') && !base.startsWith('https://'))) {
+      throw ArgumentError('Invalid base URL');
+    }
+    if (isSmsPortalHostMisusedAsApi(base)) {
+      throw ArgumentError('SMS portal host cannot be used as the API base');
+    }
+    final u = Uri.parse('$base${ApiConstants.healthPath}');
+    return http
+        .get(
+          u,
+          headers: const {'Accept': 'application/json'},
+        )
+        .timeout(
+          _requestTimeout,
+          onTimeout: () => throw _timeout(ApiConstants.healthPath),
+        );
+  }
+
   Future<Map<String, String>> _headers({bool jsonBody = false}) async {
     final headers = <String, String>{
       'Accept': 'application/json',

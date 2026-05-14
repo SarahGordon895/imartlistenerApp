@@ -48,4 +48,7 @@ class ApiConstants {
 
   /// Live polls mirrored to Laravel / SMSver1 (`audience_polls`).
   static const String pollsPath = '/api/v1/polls';
+
+  /// Public JSON probe (no auth); confirms this host is Laravel API, not SMS portal HTML.
+  static const String healthPath = '/api/v1/health';
 }
