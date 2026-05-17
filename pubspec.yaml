@@ -1,7 +1,7 @@
 name: vll_sms
 description: Victoria Lush VLL SMS (rebuilt from alpha APK; matches tz.co.victorialush.vllsms).
 publish_to: "none"
-version: 1.0.6+8
+version: 1.0.7+10
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -19,6 +19,8 @@ dependencies:
   path: ^1.9.0
   flutter_local_notifications: ^17.2.3
   sqflite_common_ffi: ^2.3.3
+  package_info_plus: ^8.0.2
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:

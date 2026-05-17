@@ -6,15 +6,24 @@ class ApiConstants {
   /// Canonical API hostname (needs DNS A record → VPS). Used as `Host` when connecting via IP.
   static const String defaultLaravelApiVirtualHost = 'api.victorialush.co.tz';
 
-  /// Reachable now while `api.victorialush.co.tz` has no public DNS yet (VPS 162.220.11.235).
+  /// VPS IP — always resolvable; Apache needs `Host: api.victorialush.co.tz` (set in [ApiClient]).
   static const String productionApiReachableBase = 'http://162.220.11.235';
 
-  /// Preferred URL after DNS + HTTPS cert exist (logo×5 → admin PIN to switch).
+  /// HTTPS API via SMS vhost proxy (`/api/v1` → Laravel). Preferred on mobile (no cleartext).
+  static const String productionApiBaseHttpsSms = 'https://sms.victorialush.co.tz';
+
+  /// Preferred URL after `api` DNS + cert exist (logo×5 → admin PIN to switch).
   static const String preferredLaravelApiBaseHttps =
       'https://api.victorialush.co.tz';
 
-  /// Production Laravel JSON host (NOT `sms.*` portal root for login — use `/api/v1` on API host).
-  static const String defaultLaravelApiBase = productionApiReachableBase;
+  /// First choice for auto-discovery ([ApiClient.discoverReachableApiBase]).
+  static const List<String> productionApiBaseCandidates = [
+    productionApiBaseHttpsSms,
+    productionApiReachableBase,
+  ];
+
+  /// Production Laravel JSON host (paths below include `/api/v1/...`).
+  static const String defaultLaravelApiBase = productionApiBaseHttpsSms;
 
   /// Laravel JSON host only (no `/api` or `/api/v1`). Must serve `/api/v1/...` as JSON.
   static const String baseUrl = String.fromEnvironment(
@@ -61,4 +70,10 @@ class ApiConstants {
 
   /// Public JSON probe (no auth); confirms this host is Laravel API, not SMS portal HTML.
   static const String healthPath = '/api/v1/health';
+
+  /// Update manifest on SMS portal (edit when you publish a new APK + download link).
+  static const String appUpdateManifestUrl = String.fromEnvironment(
+    'APP_UPDATE_URL',
+    defaultValue: 'https://sms.victorialush.co.tz/app-update.json',
+  );
 }

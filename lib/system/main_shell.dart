@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/inbound_sync_service.dart';
 import '../services/sms_inbound_listener.dart';
+import '../widgets/app_update_dialog.dart';
 import 'compose_screen.dart';
 import 'dashboard_tab.dart';
 import 'incoming_messages_screen.dart';
@@ -30,6 +31,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       InboundSyncService.instance.flushPending();
       SmsInboundListener.instance.ensureStarted();
+      if (mounted) showAppUpdateDialogIfNeeded(context);
     });
   }
 

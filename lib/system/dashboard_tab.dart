@@ -8,7 +8,6 @@ import '../packages/http_requests.dart';
 import '../services/listening_notification.dart';
 import '../shared/branding.dart';
 import '../shared/constants.dart';
-import '../shared/flyer_copy.dart';
 import '../shared/portal_sender.dart';
 import '../shared/sender_api_payload.dart';
 import '../shared/themes.dart';
@@ -349,15 +348,6 @@ class _DashboardTabState extends State<DashboardTab> {
                   letterSpacing: 0.3,
                 ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            VllBranding.homeHeroSubtitle,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.88),
-                  height: 1.35,
-                ),
-          ),
           const SizedBox(height: 14),
           Text(
             '${VllBranding.supportTz} · ${VllBranding.supportKe}',
@@ -394,11 +384,6 @@ class _DashboardTabState extends State<DashboardTab> {
                 ),
               ],
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Counts from this device’s Inbox (synced to SMSver1). Full-station KPIs stay in your broadcast tools.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
-            ),
             const SizedBox(height: 12),
             Wrap(
               spacing: 10,
@@ -409,42 +394,6 @@ class _DashboardTabState extends State<DashboardTab> {
                 _kpiChip(context, 'Synced', '$synced', isNarrow),
                 _kpiChip(context, 'Pending sync', '$pending', isNarrow),
               ],
-            ),
-            Theme(
-              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                title: Text(
-                  'Key features (implemented)',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-                ),
-                childrenPadding: const EdgeInsets.only(bottom: 8),
-                children: [
-                  _featureLine(context, 'SMS listening & forwarding: real-time capture, authenticated portal sync, background notification (Android).'),
-                  _featureLine(context, 'Portal integration: SMSver1 users & sender IDs, login, inbox sync, configurable API URL.'),
-                  _featureLine(context, 'Polls: live tallies on-device, mirrored to Laravel `audience_polls` for SMSver1 reports; create / edit / end / delete from Polls.'),
-                  _featureLine(context, 'Audience: social checks via API with list refresh, edit, and delete (CRUD) on stored rows.'),
-                  _featureLine(context, 'Compose: segment auto-replies with EAT windows (named segments require end time); quick jump to Polls & Audience.'),
-                  _featureLine(context, 'Local DB: SQLite for inbox, polls, outbound log, cached sender IDs from portal.'),
-                ],
-              ),
-            ),
-            Theme(
-              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                title: Text(
-                  'Station KPI reference',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-                ),
-                childrenPadding: const EdgeInsets.only(bottom: 8),
-                children: [
-                  SelectableText(
-                    FlyerCopy.stationKpiReference,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black87, height: 1.4),
-                  ),
-                ],
-              ),
             ),
             if (_segmentRows.isNotEmpty) ...[
               const SizedBox(height: 12),
@@ -472,24 +421,6 @@ class _DashboardTabState extends State<DashboardTab> {
             ],
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _featureLine(BuildContext context, String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.chevron_right, size: 18, color: AppTheme.lushRed),
-          Expanded(
-            child: Text(
-              text,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black87, height: 1.35),
-            ),
-          ),
-        ],
       ),
     );
   }

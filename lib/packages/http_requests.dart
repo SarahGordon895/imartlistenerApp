@@ -95,10 +95,7 @@ class ApiClient {
       final host = baseUrl != null
           ? Uri.tryParse(baseUrl)?.host ?? ApiConstants.defaultLaravelApiVirtualHost
           : ApiConstants.defaultLaravelApiVirtualHost;
-      return 'Cannot resolve API host "$host". DNS for api.victorialush.co.tz is not set yet. '
-          'The app uses the server IP automatically; pull the latest build or tap the logo 5× → PIN → set base URL to '
-          '${ApiConstants.productionApiReachableBase}. After DNS is added in Cloudflare, use '
-          '${ApiConstants.preferredLaravelApiBaseHttps}.';
+      return 'Cannot reach the API server. Check mobile data or Wi‑Fi, install the latest app update, then try again.';
     }
     if (msg.contains('connection refused') || msg.contains('connection timed out')) {
       return 'Cannot connect to the API server. Check internet and try again.';
@@ -106,15 +103,19 @@ class ApiClient {
     return error.toString();
   }
 
-  /// SmSver1 portal root without `/api/v1` path: serves PHP/HTML, not Laravel JSON login.
+  /// True when base URL points at SMS portal *pages* (not Laravel JSON under `/api/v1/...`).
+  /// Host-only `https://sms.victorialush.co.tz` is valid — paths add `/api/v1` per request.
   static bool isSmsPortalHostMisusedAsApi(String url) {
     try {
-      final host = Uri.parse(url.trim()).host.toLowerCase();
+      final uri = Uri.parse(url.trim());
+      final host = uri.host.toLowerCase();
       if (host != 'sms.victorialush.co.tz') {
         return false;
       }
-      final path = Uri.parse(url.trim()).path.toLowerCase();
-      return !path.startsWith('/api/v1');
+      final path = uri.path.toLowerCase();
+      if (path.isEmpty || path == '/') return false;
+      if (path.startsWith('/api/v1')) return false;
+      return true;
     } catch (_) {
       return false;
     }
@@ -126,6 +127,38 @@ class ApiClient {
             : productionBaseUrl,
       );
 
+  /// Probe [ApiConstants.productionApiBaseCandidates]; persist first host that returns JSON health.
+  Future<String> discoverReachableApiBase() async {
+    for (final raw in ApiConstants.productionApiBaseCandidates) {
+      final base = resolveReachableApiBase(raw);
+      try {
+        final res = await getHealthAtBase(base);
+        if (isSuccess(res)) {
+          await setBaseUrl(base);
+          return base;
+        }
+      } catch (_) {
+        /* try next */
+      }
+    }
+    final fallback = _defaultBaseUrl;
+    await setBaseUrl(fallback);
+    return fallback;
+  }
+
+  bool _savedBaseNeedsRediscovery(String saved) {
+    final normalized = normalizeApiBaseUrl(saved);
+    try {
+      final host = Uri.parse(normalized).host.toLowerCase();
+      if (isUnresolvedApiHostname(host)) return true;
+      if (_isUnreachableSavedBase(saved)) return true;
+      if (isSmsPortalHostMisusedAsApi(saved)) return true;
+    } catch (_) {
+      return true;
+    }
+    return false;
+  }
+
   Future<String> getBaseUrl() async {
     final prefs = await SharedPreferences.getInstance();
     final fallback = _defaultBaseUrl;
@@ -133,47 +166,27 @@ class ApiClient {
       final saved = prefs.getString(_baseUrlKey)?.trim();
       if (saved != null &&
           saved.isNotEmpty &&
-          !_isUnreachableSavedBase(saved) &&
-          !isSmsPortalHostMisusedAsApi(saved)) {
-        final resolved = resolveReachableApiBase(saved);
-        if (resolved != normalizeApiBaseUrl(saved)) {
-          await prefs.setString(_baseUrlKey, resolved);
-        }
-        return resolved;
+          !_savedBaseNeedsRediscovery(saved)) {
+        return normalizeApiBaseUrl(saved);
       }
-      await prefs.setString(_baseUrlKey, fallback);
-      return fallback;
+      return discoverReachableApiBase();
     }
     final saved = prefs.getString(_baseUrlKey)?.trim();
-    if (saved != null && saved.isNotEmpty) {
-      if (_isUnreachableSavedBase(saved) ||
-          isSmsPortalHostMisusedAsApi(saved)) {
-        await prefs.setString(_baseUrlKey, fallback);
-        return fallback;
-      }
-      final resolved = resolveReachableApiBase(saved);
-      if (resolved != normalizeApiBaseUrl(saved)) {
-        await prefs.setString(_baseUrlKey, resolved);
-      }
-      return resolved;
+    if (saved != null && saved.isNotEmpty && !_savedBaseNeedsRediscovery(saved)) {
+      return normalizeApiBaseUrl(saved);
     }
-    await prefs.setString(_baseUrlKey, fallback);
-    return fallback;
+    return discoverReachableApiBase();
   }
 
-  /// In **release** builds only: seed the API host from compile-time default when nothing valid is saved.
-  /// Does not overwrite a user-set production API URL (logo → PIN → API server).
+  /// Release: pick a working API host before login (migrates broken `api.*` DNS URLs).
   Future<void> ensureProductionApiBase() async {
     if (!kReleaseMode) {
       return;
     }
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString(_baseUrlKey)?.trim();
-    if (saved == null ||
-        saved.isEmpty ||
-        _isUnreachableSavedBase(saved) ||
-        isSmsPortalHostMisusedAsApi(saved)) {
-      await prefs.setString(_baseUrlKey, _defaultBaseUrl);
+    if (saved == null || saved.isEmpty || _savedBaseNeedsRediscovery(saved)) {
+      await discoverReachableApiBase();
       return;
     }
     final resolved = resolveReachableApiBase(saved);

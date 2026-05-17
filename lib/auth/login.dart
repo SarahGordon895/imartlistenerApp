@@ -8,6 +8,7 @@ import '../shared/constants.dart';
 import '../shared/themes.dart';
 import '../widgets/loading.dart';
 import '../widgets/toast.dart';
+import '../widgets/app_update_dialog.dart';
 import '../widgets/vll_brand_logo.dart';
 import 'auth.dart';
 import '../system/main_shell.dart';
@@ -30,9 +31,6 @@ class _LoginPageState extends State<LoginPage> {
   bool _busy = false;
   String? _baseUrl;
   int _logoTapCount = 0;
-  bool _healthBusy = false;
-  bool? _healthOk;
-  String? _healthDetail;
 
   late final AuthService _auth = AuthService(ApiClient.instance);
 
@@ -40,47 +38,15 @@ class _LoginPageState extends State<LoginPage> {
   void initState() {
     super.initState();
     _loadBaseUrl();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) showAppUpdateDialogIfNeeded(context);
+    });
   }
 
   Future<void> _loadBaseUrl() async {
     final url = await ApiClient.instance.getBaseUrl();
     if (!mounted) return;
     setState(() => _baseUrl = url);
-    await _probeApiHealth();
-  }
-
-  Future<void> _probeApiHealth() async {
-    if (!mounted) return;
-    setState(() {
-      _healthBusy = true;
-      _healthOk = null;
-      _healthDetail = null;
-    });
-    try {
-      final res = await ApiClient.instance.get(ApiConstants.healthPath);
-      final ok = res.statusCode >= 200 &&
-          res.statusCode < 300 &&
-          ApiClient.isSuccess(res);
-      if (!mounted) return;
-      setState(() {
-        _healthBusy = false;
-        _healthOk = ok;
-        _healthDetail = ok
-            ? null
-            : ApiClient.errorMessageFromResponse(
-                res,
-                fallbackPrefix: 'API check failed',
-              );
-      });
-    } catch (e) {
-      if (!mounted) return;
-      final base = await ApiClient.instance.getBaseUrl();
-      setState(() {
-        _healthBusy = false;
-        _healthOk = false;
-        _healthDetail = ApiClient.friendlyNetworkError(e, baseUrl: base);
-      });
-    }
   }
 
   Future<void> _showServerDialog() async {
@@ -89,23 +55,11 @@ class _LoginPageState extends State<LoginPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('API server'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextField(
-              controller: c,
-              decoration: const InputDecoration(
-                labelText: 'Base URL',
-                hintText: 'https://your-laravel-host.com',
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Use the Laravel host that returns JSON for /api/v1/… (not a URL that serves only the SMS portal HTML).',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
-            ),
-          ],
+        content: TextField(
+          controller: c,
+          decoration: const InputDecoration(
+            labelText: 'API base URL',
+          ),
         ),
         actions: [
           TextButton(
@@ -126,7 +80,7 @@ class _LoginPageState extends State<LoginPage> {
                 final res = await ApiClient.instance.getHealthAtBase(url);
                 if (!context.mounted) return;
                 if (ApiClient.isSuccess(res)) {
-                  showToast('Laravel API reachable at this URL.');
+                  showToast('Connection OK.');
                 } else {
                   showToast(
                     ApiClient.errorMessageFromResponse(res),
@@ -159,7 +113,6 @@ class _LoginPageState extends State<LoginPage> {
     await ApiClient.instance.setBaseUrl(saved);
     if (!mounted) return;
     setState(() => _baseUrl = saved);
-    await _probeApiHealth();
     showToast('Server updated.');
   }
 
@@ -305,67 +258,7 @@ class _LoginPageState extends State<LoginPage> {
                                               color: AppTheme.lushDark,
                                             ),
                                       ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        VllBranding.loginSubtitle,
-                                        textAlign: TextAlign.center,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                              color: Colors.black54,
-                                              height: 1.35,
-                                            ),
-                                      ),
                                       const SizedBox(height: 20),
-                                      if (_healthBusy) ...[
-                                        const SizedBox(height: 4),
-                                        const Center(
-                                          child: SizedBox(
-                                            width: 22,
-                                            height: 22,
-                                            child: CircularProgressIndicator(strokeWidth: 2),
-                                          ),
-                                        ),
-                                      ] else if (_healthOk != null) ...[
-                                        const SizedBox(height: 8),
-                                        Row(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Icon(
-                                              _healthOk!
-                                                  ? Icons.cloud_done_outlined
-                                                  : Icons.cloud_off_outlined,
-                                              size: 20,
-                                              color: _healthOk!
-                                                  ? Colors.green.shade700
-                                                  : Colors.orange.shade800,
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: Text(
-                                                _healthOk!
-                                                    ? 'API server reachable (GET /api/v1/health).'
-                                                    : (_healthDetail ??
-                                                        'API not reachable. Tap logo 5× → PIN → API server if the URL is wrong.'),
-                                                style: Theme.of(context)
-                                                    .textTheme
-                                                    .bodySmall
-                                                    ?.copyWith(
-                                                      color: _healthOk!
-                                                          ? Colors.green.shade800
-                                                          : Colors.orange.shade900,
-                                                      height: 1.3,
-                                                    ),
-                                              ),
-                                            ),
-                                            TextButton(
-                                              onPressed: _busy ? null : _probeApiHealth,
-                                              child: const Text('Retry'),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
                                       TextFormField(
                                         controller: _login,
                                         textInputAction: TextInputAction.next,

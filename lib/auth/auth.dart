@@ -37,7 +37,7 @@ class AuthService {
   Future<String> login({required String login, required String password}) async {
     http.Response res;
     try {
-      // API base is chosen in [ApiClient.getBaseUrl]; release default is enforced in [main] via [ensureProductionApiBase].
+      await _api.ensureProductionApiBase();
       // Laravel accepts `user_id` (portal field name) or `login` / `username` / `email` aliases.
       res = await _api.postJson(ApiConstants.loginPath, {
         'user_id': login,
@@ -61,11 +61,20 @@ class AuthService {
         'Login request timed out. Check server/network and try again.',
       );
     } on http.ClientException catch (e) {
-      final base = await _api.getBaseUrl();
-      throw AuthException(
-        ApiClient.friendlyNetworkError(e, baseUrl: base),
-      );
+      final discovered = await _api.discoverReachableApiBase();
+      try {
+        res = await _api.postJson(ApiConstants.loginPath, {
+          'user_id': login,
+          'login': login,
+          'password': password,
+        });
+      } catch (e2) {
+        throw AuthException(
+          ApiClient.friendlyNetworkError(e2, baseUrl: discovered),
+        );
+      }
     } catch (e) {
+      if (e is AuthException) rethrow;
       throw AuthException('Login failed: $e');
     }
 
