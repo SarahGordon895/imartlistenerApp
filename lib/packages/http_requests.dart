@@ -51,17 +51,76 @@ class ApiClient {
         lower.contains('10.0.2.2');
   }
 
-  /// SmSver1 portal host: serves PHP/HTML, not Laravel `/api/v1/…` (login would 404 as HTML).
+  /// Hostnames that fail DNS today; app uses [ApiConstants.productionApiReachableBase] instead.
+  static bool isUnresolvedApiHostname(String host) {
+    final h = host.toLowerCase();
+    return h == 'api.victorialush.co.tz' ||
+        h == 'api.victorialush.com' ||
+        h.contains('victprialush') ||
+        h.contains('victorialush.com');
+  }
+
+  static bool _isIpv4Host(String host) {
+    return RegExp(r'^\d{1,3}(\.\d{1,3}){3}$').hasMatch(host);
+  }
+
+  /// When base URL is the VPS IP, Apache routes via `Host: api.victorialush.co.tz`.
+  static String? virtualHostHeaderForBase(String baseUrl) {
+    try {
+      final host = Uri.parse(normalizeApiBaseUrl(baseUrl)).host;
+      if (_isIpv4Host(host)) {
+        return ApiConstants.defaultLaravelApiVirtualHost;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Map saved/default API URL to a host the device can resolve.
+  static String resolveReachableApiBase(String url) {
+    final normalized = normalizeApiBaseUrl(url);
+    try {
+      final host = Uri.parse(normalized).host;
+      if (isUnresolvedApiHostname(host)) {
+        return normalizeApiBaseUrl(ApiConstants.productionApiReachableBase);
+      }
+    } catch (_) {}
+    return normalized;
+  }
+
+  static String friendlyNetworkError(Object error, {String? baseUrl}) {
+    final msg = error.toString().toLowerCase();
+    if (msg.contains('failed host lookup') ||
+        msg.contains('socketexception') ||
+        msg.contains('no address associated with hostname')) {
+      final host = baseUrl != null
+          ? Uri.tryParse(baseUrl)?.host ?? ApiConstants.defaultLaravelApiVirtualHost
+          : ApiConstants.defaultLaravelApiVirtualHost;
+      return 'Cannot resolve API host "$host". DNS for api.victorialush.co.tz is not set yet. '
+          'The app uses the server IP automatically; pull the latest build or tap the logo 5× → PIN → set base URL to '
+          '${ApiConstants.productionApiReachableBase}. After DNS is added in Cloudflare, use '
+          '${ApiConstants.preferredLaravelApiBaseHttps}.';
+    }
+    if (msg.contains('connection refused') || msg.contains('connection timed out')) {
+      return 'Cannot connect to the API server. Check internet and try again.';
+    }
+    return error.toString();
+  }
+
+  /// SmSver1 portal root without `/api/v1` path: serves PHP/HTML, not Laravel JSON login.
   static bool isSmsPortalHostMisusedAsApi(String url) {
     try {
       final host = Uri.parse(url.trim()).host.toLowerCase();
-      return host == 'sms.victorialush.co.tz';
+      if (host != 'sms.victorialush.co.tz') {
+        return false;
+      }
+      final path = Uri.parse(url.trim()).path.toLowerCase();
+      return !path.startsWith('/api/v1');
     } catch (_) {
       return false;
     }
   }
 
-  String get _defaultBaseUrl => normalizeApiBaseUrl(
+  String get _defaultBaseUrl => resolveReachableApiBase(
         ApiConstants.baseUrl.isNotEmpty
             ? ApiConstants.baseUrl
             : productionBaseUrl,
@@ -76,7 +135,11 @@ class ApiClient {
           saved.isNotEmpty &&
           !_isUnreachableSavedBase(saved) &&
           !isSmsPortalHostMisusedAsApi(saved)) {
-        return normalizeApiBaseUrl(saved);
+        final resolved = resolveReachableApiBase(saved);
+        if (resolved != normalizeApiBaseUrl(saved)) {
+          await prefs.setString(_baseUrlKey, resolved);
+        }
+        return resolved;
       }
       await prefs.setString(_baseUrlKey, fallback);
       return fallback;
@@ -88,7 +151,11 @@ class ApiClient {
         await prefs.setString(_baseUrlKey, fallback);
         return fallback;
       }
-      return normalizeApiBaseUrl(saved);
+      final resolved = resolveReachableApiBase(saved);
+      if (resolved != normalizeApiBaseUrl(saved)) {
+        await prefs.setString(_baseUrlKey, resolved);
+      }
+      return resolved;
     }
     await prefs.setString(_baseUrlKey, fallback);
     return fallback;
@@ -107,6 +174,11 @@ class ApiClient {
         _isUnreachableSavedBase(saved) ||
         isSmsPortalHostMisusedAsApi(saved)) {
       await prefs.setString(_baseUrlKey, _defaultBaseUrl);
+      return;
+    }
+    final resolved = resolveReachableApiBase(saved);
+    if (resolved != normalizeApiBaseUrl(saved)) {
+      await prefs.setString(_baseUrlKey, resolved);
     }
   }
 
@@ -155,7 +227,7 @@ class ApiClient {
 
   /// GET [ApiConstants.healthPath] at an explicit base URL (no `Authorization`). Use before saving API prefs.
   Future<http.Response> getHealthAtBase(String rawBaseUrl) async {
-    final base = normalizeApiBaseUrl(rawBaseUrl.trim());
+    final base = resolveReachableApiBase(rawBaseUrl.trim());
     if (base.isEmpty ||
         (!base.startsWith('http://') && !base.startsWith('https://'))) {
       throw ArgumentError('Invalid base URL');
@@ -164,10 +236,15 @@ class ApiClient {
       throw ArgumentError('SMS portal host cannot be used as the API base');
     }
     final u = Uri.parse('$base${ApiConstants.healthPath}');
+    final headers = <String, String>{'Accept': 'application/json'};
+    final vhost = virtualHostHeaderForBase(base);
+    if (vhost != null) {
+      headers['Host'] = vhost;
+    }
     return http
         .get(
           u,
-          headers: const {'Accept': 'application/json'},
+          headers: headers,
         )
         .timeout(
           _requestTimeout,
@@ -181,6 +258,11 @@ class ApiClient {
     };
     if (jsonBody) {
       headers['Content-Type'] = 'application/json';
+    }
+    final base = await getBaseUrl();
+    final vhost = virtualHostHeaderForBase(base);
+    if (vhost != null) {
+      headers['Host'] = vhost;
     }
     final token = await getToken();
     if (token != null && token.isNotEmpty) {

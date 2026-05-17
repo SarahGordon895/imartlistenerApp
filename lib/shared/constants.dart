@@ -3,8 +3,18 @@
 /// Override at compile time:
 /// `flutter run --dart-define=API_BASE=https://your-laravel-host.com`
 class ApiConstants {
-  /// Production Laravel JSON host (NOT `sms.*` — that is SmSver1 PHP and has no `/api/v1/…`).
-  static const String defaultLaravelApiBase = 'https://api.victorialush.co.tz';
+  /// Canonical API hostname (needs DNS A record → VPS). Used as `Host` when connecting via IP.
+  static const String defaultLaravelApiVirtualHost = 'api.victorialush.co.tz';
+
+  /// Reachable now while `api.victorialush.co.tz` has no public DNS yet (VPS 162.220.11.235).
+  static const String productionApiReachableBase = 'http://162.220.11.235';
+
+  /// Preferred URL after DNS + HTTPS cert exist (logo×5 → admin PIN to switch).
+  static const String preferredLaravelApiBaseHttps =
+      'https://api.victorialush.co.tz';
+
+  /// Production Laravel JSON host (NOT `sms.*` portal root for login — use `/api/v1` on API host).
+  static const String defaultLaravelApiBase = productionApiReachableBase;
 
   /// Laravel JSON host only (no `/api` or `/api/v1`). Must serve `/api/v1/...` as JSON.
   static const String baseUrl = String.fromEnvironment(

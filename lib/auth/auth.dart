@@ -63,7 +63,7 @@ class AuthService {
     } on http.ClientException catch (e) {
       final base = await _api.getBaseUrl();
       throw AuthException(
-        'Unable to reach auth server at $base. Check internet and try again. (${e.message})',
+        ApiClient.friendlyNetworkError(e, baseUrl: base),
       );
     } catch (e) {
       throw AuthException('Login failed: $e');

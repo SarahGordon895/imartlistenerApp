@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Until api.victorialush.co.tz DNS exists, release builds may use VPS IP over HTTP. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">162.220.11.235</domain>
+    </domain-config>
+</network-security-config>

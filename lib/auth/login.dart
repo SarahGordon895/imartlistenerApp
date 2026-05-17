@@ -74,10 +74,11 @@ class _LoginPageState extends State<LoginPage> {
       });
     } catch (e) {
       if (!mounted) return;
+      final base = await ApiClient.instance.getBaseUrl();
       setState(() {
         _healthBusy = false;
         _healthOk = false;
-        _healthDetail = e.toString();
+        _healthDetail = ApiClient.friendlyNetworkError(e, baseUrl: base);
       });
     }
   }
