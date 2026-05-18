@@ -30,6 +30,7 @@ class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   bool _busy = false;
   String? _baseUrl;
+  bool? _apiReady;
   int _logoTapCount = 0;
 
   late final AuthService _auth = AuthService(ApiClient.instance);
@@ -44,9 +45,18 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _loadBaseUrl() async {
-    final url = await ApiClient.instance.getBaseUrl();
-    if (!mounted) return;
-    setState(() => _baseUrl = url);
+    try {
+      await ApiClient.instance.ensureProductionApiBase();
+      final url = await ApiClient.instance.getBaseUrl();
+      if (!mounted) return;
+      setState(() {
+        _baseUrl = url;
+        _apiReady = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _apiReady = false);
+    }
   }
 
   Future<void> _showServerDialog() async {
@@ -258,7 +268,32 @@ class _LoginPageState extends State<LoginPage> {
                                               color: AppTheme.lushDark,
                                             ),
                                       ),
-                                      const SizedBox(height: 20),
+                                      if (_apiReady == true) ...[
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Icon(Icons.check_circle, size: 16, color: Colors.green.shade700),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              'Server connected',
+                                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                                    color: Colors.green.shade800,
+                                                  ),
+                                            ),
+                                          ],
+                                        ),
+                                      ] else if (_apiReady == false) ...[
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          'Cannot reach server. Check internet or install the latest app.',
+                                          textAlign: TextAlign.center,
+                                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                                color: Colors.orange.shade900,
+                                              ),
+                                        ),
+                                      ],
+                                      const SizedBox(height: 16),
                                       TextFormField(
                                         controller: _login,
                                         textInputAction: TextInputAction.next,

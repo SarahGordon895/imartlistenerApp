@@ -19,6 +19,9 @@ class ApiClient {
   static const _tokenKey = 'auth_token';
   static const _baseUrlKey = 'api_base_url';
   static const _legacyTokenKey = 'auth_token_legacy';
+  /// Bump when API host discovery rules change — clears stale saved URLs on upgrade.
+  static const _apiConfigVersionKey = 'api_config_version';
+  static const _apiConfigVersion = 4;
   /// Same as [ApiConstants.baseUrl] after compile-time `API_BASE` (see [ApiConstants.defaultLaravelApiBase]).
   static String get productionBaseUrl =>
       normalizeApiBaseUrl(ApiConstants.baseUrl);
@@ -179,8 +182,17 @@ class ApiClient {
     return discoverReachableApiBase();
   }
 
+  Future<void> _migrateApiConfigIfNeeded() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getInt(_apiConfigVersionKey) ?? 0;
+    if (v >= _apiConfigVersion) return;
+    await prefs.remove(_baseUrlKey);
+    await prefs.setInt(_apiConfigVersionKey, _apiConfigVersion);
+  }
+
   /// Pick a working API host before login (migrates broken `api.*` DNS / dead saved URLs).
   Future<void> ensureProductionApiBase() async {
+    await _migrateApiConfigIfNeeded();
     await getBaseUrl();
   }
 
