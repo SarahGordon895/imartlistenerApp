@@ -37,7 +37,7 @@ class AuthService {
   Future<String> login({required String login, required String password}) async {
     http.Response res;
     try {
-      await _api.ensureProductionApiBase();
+      await _api.discoverReachableApiBase();
       // Laravel accepts `user_id` (portal field name) or `login` / `username` / `email` aliases.
       res = await _api.postJson(ApiConstants.loginPath, {
         'user_id': login,
@@ -79,7 +79,18 @@ class AuthService {
     }
 
     if (!ApiClient.isSuccess(res)) {
-      throw AuthException(ApiClient.errorMessageFromResponse(res));
+      final msg = ApiClient.errorMessageFromResponse(res);
+      if (res.statusCode == 401) {
+        throw AuthException(
+          msg.contains('Invalid') ? msg : 'Invalid username or password.',
+        );
+      }
+      if (res.statusCode == 503) {
+        throw AuthException(
+          'Sign-in service is temporarily unavailable. Try again in a minute.',
+        );
+      }
+      throw AuthException(msg);
     }
     final decoded = ApiClient.decodeBody(res);
     final token = _extractToken(decoded);

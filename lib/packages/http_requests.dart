@@ -159,40 +159,29 @@ class ApiClient {
     return false;
   }
 
-  Future<String> getBaseUrl() async {
-    final prefs = await SharedPreferences.getInstance();
-    final fallback = _defaultBaseUrl;
-    if (kReleaseMode) {
-      final saved = prefs.getString(_baseUrlKey)?.trim();
-      if (saved != null &&
-          saved.isNotEmpty &&
-          !_savedBaseNeedsRediscovery(saved)) {
-        return normalizeApiBaseUrl(saved);
-      }
-      return discoverReachableApiBase();
+  Future<bool> _healthOkForBase(String base) async {
+    try {
+      final res = await getHealthAtBase(base);
+      return isSuccess(res);
+    } catch (_) {
+      return false;
     }
-    final saved = prefs.getString(_baseUrlKey)?.trim();
+  }
+
+  Future<String> getBaseUrl() async {
+    final saved = (await SharedPreferences.getInstance()).getString(_baseUrlKey)?.trim();
     if (saved != null && saved.isNotEmpty && !_savedBaseNeedsRediscovery(saved)) {
-      return normalizeApiBaseUrl(saved);
+      final normalized = normalizeApiBaseUrl(saved);
+      if (await _healthOkForBase(normalized)) {
+        return normalized;
+      }
     }
     return discoverReachableApiBase();
   }
 
-  /// Release: pick a working API host before login (migrates broken `api.*` DNS URLs).
+  /// Pick a working API host before login (migrates broken `api.*` DNS / dead saved URLs).
   Future<void> ensureProductionApiBase() async {
-    if (!kReleaseMode) {
-      return;
-    }
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString(_baseUrlKey)?.trim();
-    if (saved == null || saved.isEmpty || _savedBaseNeedsRediscovery(saved)) {
-      await discoverReachableApiBase();
-      return;
-    }
-    final resolved = resolveReachableApiBase(saved);
-    if (resolved != normalizeApiBaseUrl(saved)) {
-      await prefs.setString(_baseUrlKey, resolved);
-    }
+    await getBaseUrl();
   }
 
   Future<void> setBaseUrl(String url) async {
