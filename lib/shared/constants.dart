@@ -3,27 +3,44 @@
 /// Override at compile time:
 /// `flutter run --dart-define=API_BASE=https://your-laravel-host.com`
 class ApiConstants {
-  /// Canonical API hostname (needs DNS A record → VPS). Used as `Host` when connecting via IP.
-  static const String defaultLaravelApiVirtualHost = 'api.victorialush.co.tz';
+  /// Primary API hostname (Apache vhost on VPS). Used as `Host` when base URL is the server IP.
+  static const String defaultApiVirtualHost = 'api.victorialush.com';
 
-  /// VPS IP — always resolvable; Apache needs `Host: api.victorialush.co.tz` (set in [ApiClient]).
+  /// Alternate canonical host (.co.tz).
+  static const String alternateApiVirtualHost = 'api.victorialush.co.tz';
+
+  /// VPS IP — reachable when `api.*` DNS is not configured yet.
   static const String productionApiReachableBase = 'http://162.220.11.235';
 
-  /// HTTPS API via SMS vhost proxy (`/api/v1` → Laravel). Preferred on mobile (no cleartext).
+  /// HTTPS API via SMS portal proxy (`/api/v1` → Laravel). Works with public DNS today.
   static const String productionApiBaseHttpsSms = 'https://sms.victorialush.co.tz';
 
-  /// Preferred URL after `api` DNS + cert exist (logo×5 → admin PIN to switch).
-  static const String preferredLaravelApiBaseHttps =
-      'https://api.victorialush.co.tz';
+  /// Direct HTTPS API hosts (require DNS A record → VPS).
+  static const String productionApiBaseHttpsCom = 'https://api.victorialush.com';
+  static const String productionApiBaseHttpsTz = 'https://api.victorialush.co.tz';
 
-  /// First choice for auto-discovery ([ApiClient.discoverReachableApiBase]).
+  /// Virtual hosts to probe with [productionApiReachableBase] + `Host` header.
+  static const List<String> apiVirtualHosts = [
+    defaultApiVirtualHost,
+    alternateApiVirtualHost,
+  ];
+
+  /// Order: direct HTTPS (when DNS works) → SMS proxy → IP + virtual host.
   static const List<String> productionApiBaseCandidates = [
+    productionApiBaseHttpsCom,
+    productionApiBaseHttpsTz,
     productionApiBaseHttpsSms,
     productionApiReachableBase,
   ];
 
-  /// Production Laravel JSON host (paths below include `/api/v1/...`).
+  /// Default for new installs.
   static const String defaultLaravelApiBase = productionApiBaseHttpsSms;
+
+  @Deprecated('Use defaultApiVirtualHost')
+  static const String defaultLaravelApiVirtualHost = defaultApiVirtualHost;
+
+  @Deprecated('Use productionApiBaseHttpsTz')
+  static const String preferredLaravelApiBaseHttps = productionApiBaseHttpsTz;
 
   /// Laravel JSON host only (no `/api` or `/api/v1`). Must serve `/api/v1/...` as JSON.
   static const String baseUrl = String.fromEnvironment(

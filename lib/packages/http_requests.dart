@@ -21,7 +21,8 @@ class ApiClient {
   static const _legacyTokenKey = 'auth_token_legacy';
   /// Bump when API host discovery rules change — clears stale saved URLs on upgrade.
   static const _apiConfigVersionKey = 'api_config_version';
-  static const _apiConfigVersion = 4;
+  static const _apiVirtualHostKey = 'api_virtual_host';
+  static const _apiConfigVersion = 5;
   /// Same as [ApiConstants.baseUrl] after compile-time `API_BASE` (see [ApiConstants.defaultLaravelApiBase]).
   static String get productionBaseUrl =>
       normalizeApiBaseUrl(ApiConstants.baseUrl);
@@ -54,40 +55,38 @@ class ApiClient {
         lower.contains('10.0.2.2');
   }
 
-  /// Hostnames that fail DNS today; app uses [ApiConstants.productionApiReachableBase] instead.
-  static bool isUnresolvedApiHostname(String host) {
+  /// `api.*` hosts without public DNS — use VPS IP + `Host` header instead.
+  static bool isApiSubdomainWithoutDns(String host) {
     final h = host.toLowerCase();
-    return h == 'api.victorialush.co.tz' ||
-        h == 'api.victorialush.com' ||
-        h.contains('victprialush') ||
-        h.contains('victorialush.com');
+    return h == 'api.victorialush.co.tz' || h == 'api.victorialush.com';
   }
 
   static bool _isIpv4Host(String host) {
     return RegExp(r'^\d{1,3}(\.\d{1,3}){3}$').hasMatch(host);
   }
 
-  /// When base URL is the VPS IP, Apache routes via `Host: api.victorialush.co.tz`.
-  static String? virtualHostHeaderForBase(String baseUrl) {
-    try {
-      final host = Uri.parse(normalizeApiBaseUrl(baseUrl)).host;
-      if (_isIpv4Host(host)) {
-        return ApiConstants.defaultLaravelApiVirtualHost;
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  /// Map saved/default API URL to a host the device can resolve.
+  /// When user saves `https://api.victorialush.com` but DNS is missing, store IP + virtual host.
   static String resolveReachableApiBase(String url) {
     final normalized = normalizeApiBaseUrl(url);
     try {
       final host = Uri.parse(normalized).host;
-      if (isUnresolvedApiHostname(host)) {
+      if (isApiSubdomainWithoutDns(host)) {
         return normalizeApiBaseUrl(ApiConstants.productionApiReachableBase);
       }
     } catch (_) {}
     return normalized;
+  }
+
+  Future<String?> _virtualHostHeaderForBase(String baseUrl) async {
+    try {
+      final host = Uri.parse(normalizeApiBaseUrl(baseUrl)).host;
+      if (_isIpv4Host(host)) {
+        final prefs = await SharedPreferences.getInstance();
+        return prefs.getString(_apiVirtualHostKey) ??
+            ApiConstants.defaultApiVirtualHost;
+      }
+    } catch (_) {}
+    return null;
   }
 
   static String friendlyNetworkError(Object error, {String? baseUrl}) {
@@ -96,8 +95,8 @@ class ApiClient {
         msg.contains('socketexception') ||
         msg.contains('no address associated with hostname')) {
       final host = baseUrl != null
-          ? Uri.tryParse(baseUrl)?.host ?? ApiConstants.defaultLaravelApiVirtualHost
-          : ApiConstants.defaultLaravelApiVirtualHost;
+          ? Uri.tryParse(baseUrl)?.host ?? ApiConstants.defaultApiVirtualHost
+          : ApiConstants.defaultApiVirtualHost;
       return 'Cannot reach the API server. Check mobile data or Wi‑Fi, install the latest app update, then try again.';
     }
     if (msg.contains('connection refused') || msg.contains('connection timed out')) {
@@ -130,21 +129,42 @@ class ApiClient {
             : productionBaseUrl,
       );
 
-  /// Probe [ApiConstants.productionApiBaseCandidates]; persist first host that returns JSON health.
+  /// Probe all production routes; persist first working base (+ virtual host when using IP).
   Future<String> discoverReachableApiBase() async {
+    final prefs = await SharedPreferences.getInstance();
+
     for (final raw in ApiConstants.productionApiBaseCandidates) {
-      final base = resolveReachableApiBase(raw);
+      if (_isIpv4Host(Uri.parse(raw).host)) {
+        continue;
+      }
       try {
-        final res = await getHealthAtBase(base);
+        final res = await getHealthAtBase(raw);
         if (isSuccess(res)) {
-          await setBaseUrl(base);
-          return base;
+          await prefs.remove(_apiVirtualHostKey);
+          await setBaseUrl(raw);
+          return raw;
         }
       } catch (_) {
         /* try next */
       }
     }
-    final fallback = _defaultBaseUrl;
+
+    final ip = ApiConstants.productionApiReachableBase;
+    for (final vhost in ApiConstants.apiVirtualHosts) {
+      try {
+        final res = await getHealthAtBase(ip, virtualHost: vhost);
+        if (isSuccess(res)) {
+          await prefs.setString(_apiVirtualHostKey, vhost);
+          await setBaseUrl(ip);
+          return ip;
+        }
+      } catch (_) {
+        /* try next */
+      }
+    }
+
+    final fallback = ApiConstants.productionApiBaseHttpsSms;
+    await prefs.remove(_apiVirtualHostKey);
     await setBaseUrl(fallback);
     return fallback;
   }
@@ -153,7 +173,7 @@ class ApiClient {
     final normalized = normalizeApiBaseUrl(saved);
     try {
       final host = Uri.parse(normalized).host.toLowerCase();
-      if (isUnresolvedApiHostname(host)) return true;
+      if (isApiSubdomainWithoutDns(host)) return true;
       if (_isUnreachableSavedBase(saved)) return true;
       if (isSmsPortalHostMisusedAsApi(saved)) return true;
     } catch (_) {
@@ -187,6 +207,7 @@ class ApiClient {
     final v = prefs.getInt(_apiConfigVersionKey) ?? 0;
     if (v >= _apiConfigVersion) return;
     await prefs.remove(_baseUrlKey);
+    await prefs.remove(_apiVirtualHostKey);
     await prefs.setInt(_apiConfigVersionKey, _apiConfigVersion);
   }
 
@@ -202,6 +223,20 @@ class ApiClient {
     if (isSmsPortalHostMisusedAsApi(normalized)) {
       await prefs.setString(_baseUrlKey, _defaultBaseUrl);
       return;
+    }
+    try {
+      final host = Uri.parse(normalized).host.toLowerCase();
+      if (isApiSubdomainWithoutDns(host)) {
+        await prefs.setString(_apiVirtualHostKey, host);
+        await prefs.setString(
+          _baseUrlKey,
+          ApiConstants.productionApiReachableBase,
+        );
+        return;
+      }
+      await prefs.remove(_apiVirtualHostKey);
+    } catch (_) {
+      await prefs.remove(_apiVirtualHostKey);
     }
     await prefs.setString(_baseUrlKey, normalized);
   }
@@ -240,7 +275,10 @@ class ApiClient {
   }
 
   /// GET [ApiConstants.healthPath] at an explicit base URL (no `Authorization`). Use before saving API prefs.
-  Future<http.Response> getHealthAtBase(String rawBaseUrl) async {
+  Future<http.Response> getHealthAtBase(
+    String rawBaseUrl, {
+    String? virtualHost,
+  }) async {
     final base = resolveReachableApiBase(rawBaseUrl.trim());
     if (base.isEmpty ||
         (!base.startsWith('http://') && !base.startsWith('https://'))) {
@@ -251,8 +289,8 @@ class ApiClient {
     }
     final u = Uri.parse('$base${ApiConstants.healthPath}');
     final headers = <String, String>{'Accept': 'application/json'};
-    final vhost = virtualHostHeaderForBase(base);
-    if (vhost != null) {
+    final vhost = virtualHost ?? await _virtualHostHeaderForBase(base);
+    if (vhost != null && vhost.isNotEmpty) {
       headers['Host'] = vhost;
     }
     return http
@@ -274,8 +312,8 @@ class ApiClient {
       headers['Content-Type'] = 'application/json';
     }
     final base = await getBaseUrl();
-    final vhost = virtualHostHeaderForBase(base);
-    if (vhost != null) {
+    final vhost = await _virtualHostHeaderForBase(base);
+    if (vhost != null && vhost.isNotEmpty) {
       headers['Host'] = vhost;
     }
     final token = await getToken();
