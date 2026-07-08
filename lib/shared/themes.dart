@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  static const Color lushRed = Color(0xFFC41E3A);
-  /// Flyer accent (gold).
+  /// Brand red (iMart wordmark / globe quadrant).
+  static const Color lushRed = Color(0xFFE31C23);
+  /// Brand navy (globe + "Group ltd").
+  static const Color lushNavy = Color(0xFF0B2C5F);
+  /// Legacy accent (gold) — keep sparingly for highlights.
   static const Color lushGold = Color(0xFFD4AF37);
-  static const Color lushDark = Color(0xFF1B1F24);
+  /// Dark surface — navy-aligned.
+  static const Color lushDark = Color(0xFF0B2C5F);
 
   static ThemeData light() {
     final base = ThemeData(
@@ -44,6 +48,7 @@ class AppTheme {
         style: FilledButton.styleFrom(
           minimumSize: const Size(88, 48),
           tapTargetSize: MaterialTapTargetSize.padded,
+          backgroundColor: lushRed,
         ),
       ),
     );

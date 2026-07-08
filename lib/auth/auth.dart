@@ -33,15 +33,16 @@ class AuthService {
 
   bool _ok(http.Response res) => res.statusCode >= 200 && res.statusCode < 300;
 
-  /// Same credentials as SMSver1 portal (`users` table via Laravel).
+  /// Same credentials as imartPortal (`users` table via Laravel).
   Future<String> login({required String login, required String password}) async {
     http.Response res;
     try {
-      await _api.discoverReachableApiBase();
-      // Laravel accepts `user_id` (portal field name) or `login` / `username` / `email` aliases.
+      // Prefer already-resolved base (local is pinned at startup). No full rediscovery.
+      await _api.ensureProductionApiBase();
       res = await _api.postJson(ApiConstants.loginPath, {
         'user_id': login,
         'login': login,
+        'username': login,
         'password': password,
       });
       final firstDecoded = ApiClient.decodeBody(res);
@@ -53,24 +54,26 @@ class AuthService {
         res = await _api.postForm(ApiConstants.loginPath, {
           'user_id': login,
           'login': login,
+          'username': login,
           'password': password,
         });
       }
     } on TimeoutException {
       throw AuthException(
-        'Login request timed out. Check server/network and try again.',
+        'Login request timed out. Check that listenerBackend is running on port 8000.',
       );
     } on http.ClientException catch (e) {
-      final discovered = await _api.discoverReachableApiBase();
       try {
+        await _api.discoverReachableApiBase();
         res = await _api.postJson(ApiConstants.loginPath, {
           'user_id': login,
           'login': login,
+          'username': login,
           'password': password,
         });
       } catch (e2) {
         throw AuthException(
-          ApiClient.friendlyNetworkError(e2, baseUrl: discovered),
+          ApiClient.friendlyNetworkError(e2),
         );
       }
     } catch (e) {

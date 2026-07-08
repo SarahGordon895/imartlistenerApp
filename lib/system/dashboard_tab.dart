@@ -1,25 +1,39 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../auth/auth.dart';
+import '../auth/login.dart';
 import '../data/local_database.dart';
 import '../packages/http_requests.dart';
+import '../services/listen_filter_service.dart';
 import '../services/listening_notification.dart';
+import '../services/notification_capture_service.dart';
 import '../shared/branding.dart';
 import '../shared/constants.dart';
+import '../shared/flyer_copy.dart';
 import '../shared/portal_sender.dart';
 import '../shared/sender_api_payload.dart';
 import '../shared/themes.dart';
-import 'compose_screen.dart';
-import 'incoming_messages_screen.dart';
 import '../widgets/loading.dart';
 import '../widgets/toast.dart';
 import '../widgets/vll_brand_logo.dart';
-import '../auth/login.dart';
+import 'sms_settings_screen.dart';
 
+/// Business desk home: bind sender, enable capture, open Inbox / Reply / Social.
 class DashboardTab extends StatefulWidget {
-  const DashboardTab({super.key});
+  const DashboardTab({
+    super.key,
+    this.onOpenTab,
+    this.onOpenSocialLookup,
+    this.onOpenReply,
+  });
+
+  /// 0 Home, 1 Inbox, 2 Reply, 3 Social
+  final void Function(int index)? onOpenTab;
+  final void Function({String? phone})? onOpenSocialLookup;
+  final VoidCallback? onOpenReply;
 
   @override
   State<DashboardTab> createState() => _DashboardTabState();
@@ -30,11 +44,11 @@ class _DashboardTabState extends State<DashboardTab> {
   bool _senderLoading = true;
   List<_SenderOption> _senders = [];
   _SenderOption? _selected;
-
+  Set<String> _listenFilters = {};
+  bool _notifCaptureEnabled = true;
   String? _portalPhone;
-
   Map<String, int> _kpis = {};
-  List<Map<String, Object?>> _segmentRows = [];
+  String _smsDriverLabel = '…';
 
   @override
   void initState() {
@@ -42,24 +56,76 @@ class _DashboardTabState extends State<DashboardTab> {
     _bootstrap();
   }
 
+  Future<void> _safe(Future<void> f) =>
+      f.timeout(const Duration(seconds: 8), onTimeout: () {});
+
   Future<void> _bootstrap() async {
-    await _loadUserProfile();
-    await _loadSenders();
-    await _loadEngagementKpis();
+    await Future.wait([
+      _safe(_loadUserProfile()),
+      _loadSenders(),
+      _safe(_loadListenFilters()),
+      _safe(_loadKpis()),
+      _safe(_refreshNotifCapture()),
+      _safe(_loadSmsStatus()),
+    ]);
   }
 
-  Future<void> _loadEngagementKpis() async {
+  Future<void> _loadSmsStatus() async {
     try {
-      final k = await LocalDatabase.instance.inboundKpis();
-      final s = await LocalDatabase.instance.inboundSegmentBreakdown();
+      final res = await ApiClient.instance.get(ApiConstants.smsStatusPath);
+      if (res.statusCode < 200 || res.statusCode >= 300) return;
+      final data = ApiClient.responseData(res);
+      if (data is! Map) return;
+      final m = Map<String, dynamic>.from(data);
+      final driver = (m['driver'] ?? 'unknown').toString();
+      final manual = m['manual_reply_enabled'] == true;
       if (!mounted) return;
       setState(() {
-        _kpis = k;
-        _segmentRows = s;
+        _smsDriverLabel = manual ? 'Manual · $driver' : 'Driver · $driver';
       });
     } catch (_) {
-      /* ignore */
+      if (!mounted) return;
+      setState(() => _smsDriverLabel = 'SMS offline');
     }
+  }
+
+  Future<void> _refreshNotifCapture() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      if (mounted) setState(() => _notifCaptureEnabled = true);
+      return;
+    }
+    final ok = await NotificationCaptureService.instance.isEnabled();
+    if (!mounted) return;
+    setState(() => _notifCaptureEnabled = ok);
+    if (ok) await NotificationCaptureService.instance.ensureStarted();
+  }
+
+  Future<void> _loadListenFilters() async {
+    final selected = await ListenFilterService.instance.getSelected();
+    if (!mounted) return;
+    setState(() => _listenFilters = selected);
+  }
+
+  Future<void> _toggleListenFilter(String senderId) async {
+    await ListenFilterService.instance.toggle(senderId);
+    await _loadListenFilters();
+    try {
+      await ApiClient.instance.postJson(ApiConstants.listenFiltersPath, {
+        'sender_ids': _listenFilters.toList(),
+      });
+    } catch (_) {}
+    if (!mounted) return;
+    showToast(_listenFilters.isEmpty
+        ? 'Capturing under default bound sender.'
+        : 'Sender filters: ${_listenFilters.length}');
+  }
+
+  Future<void> _loadKpis() async {
+    try {
+      final k = await LocalDatabase.instance.inboundKpis();
+      if (!mounted) return;
+      setState(() => _kpis = k);
+    } catch (_) {}
   }
 
   Future<void> _loadUserProfile() async {
@@ -68,53 +134,40 @@ class _DashboardTabState extends State<DashboardTab> {
       if (res.statusCode < 200 || res.statusCode >= 300) return;
       final data = ApiClient.responseData(res);
       if (data is Map) {
-        final m = Map<String, dynamic>.from(data);
-        final phone = m['contact_phone']?.toString();
+        final phone = Map<String, dynamic>.from(data)['contact_phone']?.toString();
         if (!mounted) return;
         setState(() => _portalPhone = phone);
       }
-    } catch (_) {
-      /* ignore */
-    }
+    } catch (_) {}
   }
 
   Future<void> _loadSenders() async {
     if (mounted) setState(() => _senderLoading = true);
     try {
-      final res = await ApiClient.instance.get(ApiConstants.sendersListPath);
-      ApiClient.ensureHttpAndEnvelopeSuccess(
-        res,
-        fallbackPrefix: 'Failed to load sender IDs',
-      );
+      final res = await ApiClient.instance
+          .get(ApiConstants.sendersListPath)
+          .timeout(const Duration(seconds: 8));
+      ApiClient.ensureHttpAndEnvelopeSuccess(res, fallbackPrefix: 'Sender load failed');
       final data = ApiClient.responseData(res);
       final list = SenderApiPayload.extractSendersList(data);
-      final currentSender = SenderApiPayload.extractCurrentSenderId(data);
-      await LocalDatabase.instance.replacePortalSendersFromApi(list);
-      _commitSenderOptions(list, currentSender);
-      if (mounted && _senders.isEmpty) {
-        showToast(
-          'No Active sender IDs from SMSver1 for this account. Add or approve them in the portal.',
-          error: true,
-        );
+      final current = SenderApiPayload.extractCurrentSenderId(data);
+      try {
+        await LocalDatabase.instance
+            .replacePortalSendersFromApi(list)
+            .timeout(const Duration(seconds: 3));
+      } catch (_) {}
+      _commitSenderOptions(list, current);
+    } catch (_) {
+      try {
+        final rows = await LocalDatabase.instance
+            .listPortalSenders()
+            .timeout(const Duration(seconds: 3));
+        _commitSenderOptions(rows, null);
+      } catch (_) {
+        _commitSenderOptions([], null);
       }
-    } on TimeoutException {
-      final rows = await LocalDatabase.instance.listPortalSenders();
-      _commitSenderOptions(rows, null);
-      if (mounted && _senders.isEmpty) {
-        showToast('Loading sender IDs timed out. Check connection and retry.', error: true);
-      } else if (mounted) {
-        showToast('Timeout — showing last synced sender IDs from SMSver1.', error: true);
-      }
-    } catch (e) {
-      final rows = await LocalDatabase.instance.listPortalSenders();
-      _commitSenderOptions(rows, null);
-      if (mounted) {
-        if (_senders.isEmpty) {
-          showToast('Could not load sender IDs: $e', error: true);
-        } else {
-          showToast('Using last synced sender IDs from SMSver1 (API unavailable).', error: false);
-        }
-      }
+    } finally {
+      if (mounted) setState(() => _senderLoading = false);
     }
   }
 
@@ -141,7 +194,7 @@ class _DashboardTabState extends State<DashboardTab> {
   Future<void> _bindSender() async {
     final sel = _selected;
     if (sel == null) {
-      showToast('Please select sender ID.', error: true);
+      showToast('Select a sender ID first.', error: true);
       return;
     }
     setState(() => _working = true);
@@ -150,47 +203,9 @@ class _DashboardTabState extends State<DashboardTab> {
         'sender_id': normalizeOutgoingSenderId(sel.senderId),
       });
       if (res.statusCode < 200 || res.statusCode >= 300) {
-        throw Exception(
-          ApiClient.errorMessageFromResponse(
-            res,
-            fallbackPrefix: 'Bind failed',
-          ),
-        );
+        throw Exception(ApiClient.errorMessageFromResponse(res));
       }
-      final decoded = ApiClient.decodeBody(res);
-      if (decoded is Map && decoded['success'] == false) {
-        throw Exception(decoded['message']?.toString() ?? 'Bind rejected');
-      }
-      showToast('Sender ID attached to portal phone.');
-    } on TimeoutException {
-      showToast('Bind request timed out. Please try again.', error: true);
-    } catch (e) {
-      showToast(e.toString(), error: true);
-    } finally {
-      if (mounted) setState(() => _working = false);
-    }
-  }
-
-  Future<void> _unbindSender() async {
-    setState(() => _working = true);
-    try {
-      final res = await ApiClient.instance.delete(ApiConstants.senderUnbindPath);
-      if (res.statusCode < 200 || res.statusCode >= 300) {
-        throw Exception(
-          ApiClient.errorMessageFromResponse(
-            res,
-            fallbackPrefix: 'Unbind failed',
-          ),
-        );
-      }
-      final decoded = ApiClient.decodeBody(res);
-      if (decoded is Map && decoded['success'] == false) {
-        throw Exception(decoded['message']?.toString() ?? 'Unbind rejected');
-      }
-      final msg = ApiClient.successMessageFromResponse(res);
-      showToast(msg ?? 'Sender binding cleared.');
-    } on TimeoutException {
-      showToast('Unbind request timed out. Please try again.', error: true);
+      showToast('Sender ID bound for SMS replies.');
     } catch (e) {
       showToast(e.toString(), error: true);
     } finally {
@@ -200,16 +215,12 @@ class _DashboardTabState extends State<DashboardTab> {
 
   Future<void> _logout() async {
     setState(() => _working = true);
-    var logoutErr = '';
     try {
-      // Some desktop targets may not have notification plugin channels; don't block logout.
       try {
         await ListeningNotification.instance.dismiss();
       } catch (_) {}
-
       await AuthService(ApiClient.instance).logout();
-    } catch (e) {
-      logoutErr = e.toString();
+    } catch (_) {
     } finally {
       await ApiClient.instance.setToken(null);
       if (mounted) {
@@ -217,310 +228,252 @@ class _DashboardTabState extends State<DashboardTab> {
           MaterialPageRoute<void>(builder: (_) => const LoginPage()),
           (_) => false,
         );
-        if (logoutErr.isNotEmpty) {
-          showToast(logoutErr, error: true);
-        }
-        setState(() => _working = false);
       }
     }
   }
 
-  void _openCompose() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const ComposeScreen()),
-    );
-  }
-
-  void _openInbox() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => const IncomingMessagesScreen(isActive: true),
-      ),
-    );
-  }
-
-
-  Future<void> _pullRefresh() async {
-    await _bootstrap();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final wideActions = MediaQuery.sizeOf(context).width >= 420;
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          VllBranding.appTitle,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: const Text(VllBranding.appTitle),
         actions: [
           IconButton(
-            onPressed: _working ? null : _loadEngagementKpis,
-            tooltip: 'Refresh engagement stats',
-            icon: const Icon(Icons.analytics_outlined),
+            tooltip: 'Refresh',
+            onPressed: _working ? null : _bootstrap,
+            icon: const Icon(Icons.refresh),
           ),
-          if (wideActions)
-            TextButton(
-              onPressed: _working ? null : _logout,
-              child: const Text('Logout', style: TextStyle(color: Colors.white)),
-            )
-          else
-            IconButton(
-              tooltip: 'Logout',
-              onPressed: _working ? null : _logout,
-              icon: const Icon(Icons.logout),
-            ),
+          IconButton(
+            tooltip: 'Logout',
+            onPressed: _working ? null : _logout,
+            icon: const Icon(Icons.logout),
+          ),
         ],
       ),
       body: LoadingOverlay(
         show: _working,
-        child: LayoutBuilder(
-          builder: (context, c) {
-            final maxW = c.maxWidth > 1100 ? 980.0 : c.maxWidth;
-            final isNarrow = c.maxWidth < 420;
-            final hPad = isNarrow ? 12.0 : (c.maxWidth > 800 ? 24.0 : 16.0);
-            final bottomInset = MediaQuery.paddingOf(context).bottom;
-            return Center(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: maxW),
-                child: RefreshIndicator(
-                  onRefresh: _pullRefresh,
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: EdgeInsets.fromLTRB(hPad, 12, hPad, 16 + bottomInset),
-                    children: [
-                      _buildHeroCard(context, isNarrow),
-                      const SizedBox(height: 12),
-                      _buildKpiCard(context, isNarrow),
-                      const SizedBox(height: 12),
-                      _buildSenderCard(isNarrow),
-                      const SizedBox(height: 12),
-                      _buildQuickActionsCard(isNarrow),
-                    ],
-                  ),
-                ),
+        child: RefreshIndicator(
+          onRefresh: _bootstrap,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            children: [
+              _hero(),
+              const SizedBox(height: 12),
+              _deskStats(),
+              const SizedBox(height: 12),
+              _setupCard(),
+              const SizedBox(height: 12),
+              _actions(),
+              const SizedBox(height: 16),
+              Text(
+                FlyerCopy.headline,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
               ),
-            );
-          },
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildHeroCard(BuildContext context, bool isNarrow) {
+  Widget _hero() {
     return Container(
-      padding: EdgeInsets.fromLTRB(
-        isNarrow ? 14 : 18,
-        isNarrow ? 16 : 20,
-        isNarrow ? 14 : 18,
-        isNarrow ? 14 : 18,
-      ),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            AppTheme.lushRed,
-            AppTheme.lushRed.withValues(alpha: 0.88),
-            AppTheme.lushDark,
-          ],
+          colors: [AppTheme.lushRed, AppTheme.lushNavy.withValues(alpha: 0.95)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        children: [
+          const VllBrandLogo(tone: VllLogoTone.onBrandField, height: 72, maxWidth: 200),
+          const SizedBox(height: 10),
+          Text(
+            VllBranding.appTitle,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            VllBranding.homeHeroSubtitle,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.92),
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _deskStats() {
+    final awaiting = _kpis['awaiting'] ?? 0;
+    final today = _kpis['today'] ?? 0;
+    final sms = _kpis['sms'] ?? 0;
+    final wa = _kpis['whatsapp'] ?? 0;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color(0xFFE6E8ED)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Desk today',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _stat('Needs reply', '$awaiting', Colors.orange.shade50),
+              _stat('Today', '$today', Colors.blue.shade50),
+              _stat('SMS', '$sms', Colors.grey.shade100),
+              _stat('WhatsApp', '$wa', const Color(0xFFE8F8EF)),
+              _stat('Gateway', _smsDriverLabel, const Color(0xFFF3F0FF)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _stat(String label, String value, Color bg) {
+    return Container(
+      width: 150,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+          Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+        ],
+      ),
+    );
+  }
+
+  Widget _setupCard() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color(0xFFE6E8ED)),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Center(
-            child: VllBrandLogo(
-              tone: VllLogoTone.onBrandField,
-              height: isNarrow ? 64 : 72,
-              width: isNarrow ? 260 : 300,
-            ),
-          ),
-          const SizedBox(height: 12),
+          Text('1 · Capture setup',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
           Text(
-            VllBranding.appTitle,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.3,
-                ),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            '${VllBranding.supportTz} · ${VllBranding.supportKe}',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: AppTheme.lushGold,
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildKpiCard(BuildContext context, bool isNarrow) {
-    final total = _kpis['total'] ?? 0;
-    final today = _kpis['today'] ?? 0;
-    final pending = _kpis['pending'] ?? 0;
-    final synced = _kpis['synced'] ?? 0;
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.insights, color: AppTheme.lushRed, size: 22),
-                const SizedBox(width: 8),
-                Text(
-                  'Audience KPIs (this device)',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                _kpiChip(context, 'All messages', '$total', isNarrow),
-                _kpiChip(context, 'Today', '$today', isNarrow),
-                _kpiChip(context, 'Synced', '$synced', isNarrow),
-                _kpiChip(context, 'Pending sync', '$pending', isNarrow),
-              ],
-            ),
-            if (_segmentRows.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(
-                'By show segment (after portal sync)',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _segmentRows.take(6).map((r) {
-                  final seg = r['seg']?.toString() ?? '';
-                  final c = r['c'];
-                  final n = c is int ? c : int.tryParse(c.toString()) ?? 0;
-                  return Chip(
-                    avatar: CircleAvatar(
-                      backgroundColor: AppTheme.lushGold.withValues(alpha: 0.4),
-                      child: Text('$n', style: const TextStyle(fontSize: 11)),
-                    ),
-                    label: Text(seg, overflow: TextOverflow.ellipsis),
-                  );
-                }).toList(),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _kpiChip(BuildContext context, String label, String value, bool isNarrow) {
-    return Container(
-      width: isNarrow ? double.infinity : null,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        border: Border.all(color: const Color(0xFFE6E8ED)),
-        borderRadius: BorderRadius.circular(10),
-        color: Colors.white,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54)),
-          Text(value, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSenderCard(bool isNarrow) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.black12),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Text('Sender ID', style: TextStyle(fontSize: 16)),
-              ),
-              IconButton(
-                onPressed: _senderLoading ? null : _loadSenders,
-                tooltip: 'Refresh sender IDs',
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
-          ),
-          if (_portalPhone != null && _portalPhone!.trim().isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Text(
-                'Bind phone: ${_portalPhone!}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
-              ),
-            ),
-          Text(
-            VllBranding.senderListPortalHint,
+            'Bind the Sender ID used for SMS replies. On Android, allow SMS + Notification access so WhatsApp chats to this phone appear in Inbox.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
           ),
-          const SizedBox(height: 10),
+          if (_portalPhone != null && _portalPhone!.trim().isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text('Bound phone: ${_portalPhone!}',
+                style: Theme.of(context).textTheme.labelMedium),
+          ],
+          if (!_notifCaptureEnabled &&
+              !kIsWeb &&
+              defaultTargetPlatform == TargetPlatform.android) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF4E5),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFFFD8A8)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('WhatsApp capture is off',
+                      style: TextStyle(fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Enable Notification access for imartListener to capture Instagram / WhatsApp business chats.',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  FilledButton.tonal(
+                    onPressed: () async {
+                      await NotificationCaptureService.instance.openSettings();
+                      await Future<void>.delayed(const Duration(seconds: 1));
+                      await _refreshNotifCapture();
+                    },
+                    child: const Text('Enable notification access'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
           if (_senderLoading)
             const Center(child: CircularProgressIndicator())
-          else ...[
-            if (_senders.isEmpty)
-              const Text('No sender IDs available for this account.')
-            else ...[
-              DropdownButtonFormField<_SenderOption>(
-                // ignore: deprecated_member_use
-                value: _selected,
-                items: _senders
-                    .map(
-                      (e) => DropdownMenuItem(
-                        value: e,
-                        child: Text(e.label, overflow: TextOverflow.ellipsis),
+          else if (_senders.isEmpty)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'No Sender IDs yet. Add one in SMS settings — gateway credentials stay in API .env.',
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const SmsSettingsScreen(),
                       ),
-                    )
-                    .toList(),
-                onChanged: (v) => setState(() => _selected = v),
-                decoration: const InputDecoration(
-                  labelText: 'On-air sender ID',
-                  helperText: VllBranding.senderListPortalHint,
+                    ).then((_) => _loadSenders());
+                  },
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add Sender ID'),
                 ),
+              ],
+            )
+          else ...[
+            DropdownButtonFormField<_SenderOption>(
+              // ignore: deprecated_member_use
+              value: _selected,
+              items: _senders
+                  .map((e) => DropdownMenuItem(value: e, child: Text(e.label)))
+                  .toList(),
+              onChanged: (v) => setState(() => _selected = v),
+              decoration: const InputDecoration(
+                labelText: 'SMS reply Sender ID',
+                border: OutlineInputBorder(),
               ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: isNarrow ? double.infinity : 220,
-                child: FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.lushRed,
-                  ),
-                  onPressed: _working ? null : _bindSender,
-                  child: const Text('Bind sender ID'),
-                ),
-              ),
-            ],
+            ),
             const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton(
-                onPressed: _working ? null : _unbindSender,
-                child: const Text('Clear sender binding'),
-              ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.lushRed),
+              onPressed: _working ? null : _bindSender,
+              child: const Text('Bind Sender ID'),
+            ),
+            const SizedBox(height: 8),
+            Text('Optional: limit which Sender IDs this phone files under',
+                style: Theme.of(context).textTheme.labelMedium),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _senders.map((s) {
+                final selected = _listenFilters.contains(s.senderId);
+                return FilterChip(
+                  selected: selected,
+                  label: Text(s.senderId),
+                  onSelected: (_) => _toggleListenFilter(s.senderId),
+                );
+              }).toList(),
             ),
           ],
         ],
@@ -528,58 +481,47 @@ class _DashboardTabState extends State<DashboardTab> {
     );
   }
 
-  Widget _buildQuickActionsCard(bool isNarrow) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Quick Actions',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                SizedBox(
-                  width: isNarrow ? double.infinity : 220,
-                  child: FilledButton.icon(
-                    onPressed: _openInbox,
-                    icon: const Icon(Icons.inbox),
-                    label: const Text('Open Inbox'),
-                  ),
-                ),
-                SizedBox(
-                  width: isNarrow ? double.infinity : 220,
-                  child: FilledButton.icon(
-                    style: FilledButton.styleFrom(backgroundColor: AppTheme.lushRed),
-                    onPressed: _openCompose,
-                    icon: const Icon(Icons.edit),
-                    label: const Text('Open Compose'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              _senders.isEmpty
-                  ? 'No sender IDs loaded from SMSver1 yet. Tap refresh on Sender ID card.'
-                  : 'Loaded ${_senders.length} sender ID(s) from SMSver1.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
+  Widget _actions() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('2 · Work the desk',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        FilledButton.icon(
+          onPressed: () => widget.onOpenTab?.call(1),
+          icon: const Icon(Icons.inbox),
+          label: const Text('Open Inbox (SMS + WhatsApp)'),
         ),
-      ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: widget.onOpenReply ?? () => widget.onOpenTab?.call(2),
+          icon: const Icon(Icons.reply),
+          label: const Text('Manual reply (template / compose)'),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: () => widget.onOpenSocialLookup?.call(),
+          icon: const Icon(Icons.travel_explore),
+          label: const Text('Social lookup (IG / FB / more)'),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const SmsSettingsScreen()),
+            );
+          },
+          icon: const Icon(Icons.settings),
+          label: const Text('SMS settings & Sender ID'),
+        ),
+      ],
     );
   }
 }
 
 class _SenderOption {
   _SenderOption({required this.senderId, required this.label});
-
   final String senderId;
   final String label;
 
@@ -594,12 +536,10 @@ class _SenderOption {
       final rawSid = (m['sender_id'] ?? m['id'])?.toString();
       if (rawSid == null || rawSid.isEmpty) return null;
       final sid = normalizeOutgoingSenderId(rawSid);
-      var label = (m['sender_id'] ?? m['name'] ?? m['label'] ?? sid).toString();
-      label = normalizeOutgoingSenderId(label);
+      var label = normalizeOutgoingSenderId(
+          (m['sender_id'] ?? m['name'] ?? m['label'] ?? sid).toString());
       final idType = m['id_type']?.toString().trim();
-      if (idType != null && idType.isNotEmpty) {
-        label = '$label · $idType';
-      }
+      if (idType != null && idType.isNotEmpty) label = '$label · $idType';
       return _SenderOption(senderId: sid, label: label);
     }
     return null;

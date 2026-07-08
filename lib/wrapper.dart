@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'auth/auth.dart';
@@ -43,7 +44,6 @@ class _AppWrapperState extends State<AppWrapper> with WidgetsBindingObserver {
     }
   }
 
-  /// Re-validate token after backgrounding (server may have revoked / network restored).
   Future<void> _refreshSession() async {
     final ok = await _auth.hasValidSession();
     if (!mounted) return;
@@ -54,11 +54,16 @@ class _AppWrapperState extends State<AppWrapper> with WidgetsBindingObserver {
   }
 
   Future<void> _check() async {
-    await ApiClient.instance.ensureProductionApiBase();
+    // Non-blocking local pin when possible; show UI quickly.
+    unawaited(ApiClient.instance.ensureProductionApiBase());
     final t = await ApiClient.instance.getToken();
     var sessionOk = false;
     if (t != null && t.isNotEmpty) {
-      sessionOk = await _auth.hasValidSession();
+      // Don't block splash on /user if network is slow — treat timeout as still logged in.
+      sessionOk = await _auth.hasValidSession().timeout(
+        const Duration(seconds: 4),
+        onTimeout: () => true,
+      );
       if (!sessionOk) {
         await ApiClient.instance.setToken(null);
       }
@@ -81,26 +86,29 @@ class _AppWrapperState extends State<AppWrapper> with WidgetsBindingObserver {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Builder(
-                    builder: (context) {
-                      final sw = MediaQuery.sizeOf(context).width;
-                      final w = (sw - 40).clamp(200.0, 320.0);
-                      return SizedBox(
-                        width: w,
-                        height: 96,
-                        child: const FittedBox(
-                          fit: BoxFit.contain,
-                          child: VllBrandLogo(
-                            tone: VllLogoTone.onLightSurface,
-                            height: 88,
-                            width: 300,
-                          ),
-                        ),
-                      );
-                    },
+                  const VllBrandLogo(
+                    tone: VllLogoTone.onLightSurface,
+                    height: 88,
+                    maxWidth: 220,
                   ),
-                  const SizedBox(height: 18),
-                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  const SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: Color(0xFFE31C23),
+                    ),
+                  ),
+                  if (kIsWeb) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Loading imartListener…',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.black54,
+                          ),
+                    ),
+                  ],
                 ],
               ),
             ),

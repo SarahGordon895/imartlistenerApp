@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../packages/http_requests.dart';
 import '../services/listening_notification.dart';
@@ -8,10 +10,18 @@ import '../shared/branding.dart';
 import '../shared/constants.dart';
 import '../widgets/toast.dart';
 
+/// Lookup a customer / sender phone on Instagram, Facebook, WhatsApp, etc.
 class SocialChecksScreen extends StatefulWidget {
   const SocialChecksScreen({super.key, this.isActive = false});
 
   final bool isActive;
+
+  /// Prefill from Inbox / Home when user taps “Find on social”.
+  static final ValueNotifier<String?> prefillPhone = ValueNotifier<String?>(null);
+
+  static void requestPrefillPhone(String phone) {
+    prefillPhone.value = phone;
+  }
 
   @override
   State<SocialChecksScreen> createState() => _SocialChecksScreenState();
@@ -20,15 +30,32 @@ class SocialChecksScreen extends StatefulWidget {
 class _SocialChecksScreenState extends State<SocialChecksScreen> {
   final _phone = TextEditingController();
   final _batch = TextEditingController();
-  final Set<String> _platforms = {'facebook', 'instagram', 'whatsapp'};
+  final Set<String> _platforms = {
+    'facebook',
+    'instagram',
+    'whatsapp',
+    'google',
+  };
 
   bool _busy = false;
   List<Map<String, dynamic>> _results = [];
+  VoidCallback? _prefillListener;
 
   @override
   void initState() {
     super.initState();
+    _prefillListener = () {
+      final p = SocialChecksScreen.prefillPhone.value;
+      if (p == null || p.isEmpty) return;
+      _phone.text = p;
+      SocialChecksScreen.prefillPhone.value = null;
+      if (widget.isActive || mounted) {
+        _runSingle();
+      }
+    };
+    SocialChecksScreen.prefillPhone.addListener(_prefillListener!);
     if (widget.isActive) {
+      _consumePrefill();
       _loadRecent();
     }
   }
@@ -37,12 +64,26 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
   void didUpdateWidget(covariant SocialChecksScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.isActive && !oldWidget.isActive) {
+      _consumePrefill();
       _loadRecent();
     }
   }
 
+  void _consumePrefill() {
+    final p = SocialChecksScreen.prefillPhone.value;
+    if (p == null || p.isEmpty) return;
+    _phone.text = p;
+    SocialChecksScreen.prefillPhone.value = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _runSingle();
+    });
+  }
+
   @override
   void dispose() {
+    if (_prefillListener != null) {
+      SocialChecksScreen.prefillPhone.removeListener(_prefillListener!);
+    }
     _phone.dispose();
     _batch.dispose();
     super.dispose();
@@ -94,7 +135,7 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
           _results = [...fresh, ..._results];
         });
       }
-      showToast('Social check submitted.');
+      showToast('Social lookup ready — open platform links below.');
     } catch (e) {
       showToast(e.toString(), error: true);
     } finally {
@@ -129,7 +170,7 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
           _results = [...fresh, ..._results];
         });
       }
-      showToast('Batch social check submitted.');
+      showToast('Batch social lookup submitted.');
     } catch (e) {
       showToast(e.toString(), error: true);
     } finally {
@@ -153,6 +194,38 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
         );
       }
     }
+  }
+
+  Future<void> _openUrl(String raw) async {
+    final uri = Uri.tryParse(raw.trim());
+    if (uri == null) {
+      showToast('Invalid link.', error: true);
+      return;
+    }
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok) showToast('Could not open link.', error: true);
+  }
+
+  List<Map<String, String>> _linksFromRow(Map<String, dynamic> r) {
+    final out = <Map<String, String>>[];
+    final meta = r['metadata'];
+    if (meta is Map) {
+      final urls = meta['search_urls'];
+      if (urls is List) {
+        for (final item in urls) {
+          if (item is Map) {
+            final label = (item['label'] ?? 'Open').toString();
+            final url = (item['url'] ?? '').toString();
+            if (url.isNotEmpty) out.add({'label': label, 'url': url});
+          }
+        }
+      }
+    }
+    final primary = (r['profile_url'] ?? '').toString();
+    if (primary.isNotEmpty && !out.any((e) => e['url'] == primary)) {
+      out.insert(0, {'label': 'Open search', 'url': primary});
+    }
+    return out;
   }
 
   int? _rowId(Map<String, dynamic> r) {
@@ -182,7 +255,7 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
-          title: const Text('Edit social check'),
+          title: const Text('Mark social find'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -190,7 +263,7 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
                 TextField(
                   controller: status,
                   decoration: const InputDecoration(
-                    labelText: 'Status',
+                    labelText: 'Status (e.g. found / not_found)',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -199,7 +272,7 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
                   // ignore: deprecated_member_use
                   value: foundChoice,
                   decoration: const InputDecoration(
-                    labelText: 'Found',
+                    labelText: 'Found on platform?',
                     border: OutlineInputBorder(),
                   ),
                   items: const [
@@ -213,7 +286,7 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
                 TextField(
                   controller: name,
                   decoration: const InputDecoration(
-                    labelText: 'Profile name',
+                    labelText: 'Profile / display name',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -270,7 +343,7 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
       );
       ApiClient.ensureHttpAndEnvelopeSuccess(res,
           fallbackPrefix: 'Update failed');
-      showToast('Social check updated.');
+      showToast('Saved.');
       await _loadRecent();
     } catch (e) {
       showToast(e.toString(), error: true);
@@ -284,8 +357,7 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete this row?'),
-        content: const Text(
-            'Removes the record from SMSver1 / API storage (same as portal delete).'),
+        content: const Text('Removes this social lookup result from API storage.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           FilledButton(
@@ -327,12 +399,14 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
 
   Color _statusColor(String status) {
     switch (status) {
-      case 'queued_api_check':
+      case 'search_ready':
         return Colors.blue.shade100;
       case 'found':
         return Colors.green.shade100;
       case 'not_found':
         return Colors.orange.shade100;
+      case 'provider_error':
+        return Colors.red.shade100;
       default:
         return Colors.grey.shade300;
     }
@@ -343,7 +417,7 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text(
-          '${VllBranding.appTitle} · Audience',
+          '${VllBranding.appTitle} · Social',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -371,10 +445,18 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          Text(
+                            'Social phone lookup',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 6),
                           const Text(
-                            'Listener / audience analytics: probe social presence by phone (multi-platform). '
-                            'Results are stored on the Victoria Lush API — use Refresh after checks. '
-                            'Edit or delete rows below (CRUD) to tidy the list.',
+                            'Paste a number from Inbox (who messaged your business SMS / WhatsApp) '
+                            'and search Instagram, Facebook, WhatsApp, Telegram, TikTok, LinkedIn, X, or Google. '
+                            'Use this to verify callers and spot phishing / fake social sellers.',
                           ),
                           const SizedBox(height: 10),
                           Wrap(
@@ -385,24 +467,41 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
                               _platformChip('instagram', 'Instagram'),
                               _platformChip('whatsapp', 'WhatsApp'),
                               _platformChip('telegram', 'Telegram'),
+                              _platformChip('tiktok', 'TikTok'),
+                              _platformChip('linkedin', 'LinkedIn'),
                               _platformChip('x', 'X'),
+                              _platformChip('google', 'Google'),
                             ],
                           ),
                           const SizedBox(height: 12),
                           TextField(
                             controller: _phone,
-                            decoration: const InputDecoration(
-                              border: OutlineInputBorder(),
-                              labelText: 'Single phone number',
+                            keyboardType: TextInputType.phone,
+                            decoration: InputDecoration(
+                              border: const OutlineInputBorder(),
+                              labelText: 'Phone number from message',
                               hintText: '2557xxxxxxx',
+                              suffixIcon: IconButton(
+                                tooltip: 'Paste',
+                                onPressed: () async {
+                                  final data =
+                                      await Clipboard.getData(Clipboard.kTextPlain);
+                                  final t = data?.text?.trim() ?? '';
+                                  if (t.isNotEmpty) {
+                                    setState(() => _phone.text = t);
+                                  }
+                                },
+                                icon: const Icon(Icons.content_paste),
+                              ),
                             ),
                           ),
                           const SizedBox(height: 8),
                           SizedBox(
                             width: double.infinity,
-                            child: FilledButton(
+                            child: FilledButton.icon(
                               onPressed: _busy ? null : _runSingle,
-                              child: const Text('Check Number'),
+                              icon: const Icon(Icons.search),
+                              label: const Text('Search platforms'),
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -421,7 +520,7 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
                             width: double.infinity,
                             child: OutlinedButton(
                               onPressed: _busy ? null : _runBatch,
-                              child: const Text('Run Batch Check'),
+                              child: const Text('Run batch lookup'),
                             ),
                           ),
                         ],
@@ -442,7 +541,7 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
                   if (_busy) const LinearProgressIndicator(),
                   const SizedBox(height: 8),
                   Text(
-                    'Results (tap ⋮ to edit or delete)',
+                    'Results — open links to verify the account',
                     style: Theme.of(context)
                         .textTheme
                         .titleSmall
@@ -453,7 +552,9 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
                     const Card(
                       child: Padding(
                         padding: EdgeInsets.all(16),
-                        child: Text('No social check results yet.'),
+                        child: Text(
+                          'No lookups yet. Enter a sender number from Inbox, or tap Social on a message.',
+                        ),
                       ),
                     )
                   else
@@ -461,46 +562,73 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
                       final platform = (r['platform'] ?? '').toString();
                       final phone = (r['phone_number'] ?? '').toString();
                       final status = (r['status'] ?? '').toString();
-                      final url = (r['profile_url'] ?? '').toString();
+                      final name = (r['profile_name'] ?? '').toString();
                       final checked = (r['checked_at'] ?? '').toString();
+                      final links = _linksFromRow(r);
                       return Card(
-                        child: ListTile(
-                          title: Text('$platform • $phone'),
-                          subtitle: Column(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if (url.isNotEmpty) Text(url),
-                              if (checked.isNotEmpty) Text(checked),
-                            ],
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: _statusColor(status),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Text(status),
-                              ),
-                              PopupMenuButton<String>(
-                                onSelected: (v) {
-                                  if (v == 'edit') _editRow(r);
-                                  if (v == 'delete') _deleteRow(r);
-                                },
-                                itemBuilder: (ctx) => const [
-                                  PopupMenuItem(
-                                    value: 'edit',
-                                    child: Text('Edit'),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '$platform · $phone',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w700),
+                                    ),
                                   ),
-                                  PopupMenuItem(
-                                    value: 'delete',
-                                    child: Text('Delete'),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: _statusColor(status),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text(status),
+                                  ),
+                                  PopupMenuButton<String>(
+                                    onSelected: (v) {
+                                      if (v == 'edit') _editRow(r);
+                                      if (v == 'delete') _deleteRow(r);
+                                    },
+                                    itemBuilder: (ctx) => const [
+                                      PopupMenuItem(
+                                        value: 'edit',
+                                        child: Text('Mark found / edit'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'delete',
+                                        child: Text('Delete'),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
+                              if (name.isNotEmpty) Text(name),
+                              if (checked.isNotEmpty)
+                                Text(checked,
+                                    style: Theme.of(context).textTheme.bodySmall),
+                              if (links.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 6,
+                                  children: links
+                                      .map(
+                                        (l) => ActionChip(
+                                          avatar: const Icon(Icons.open_in_new,
+                                              size: 16),
+                                          label: Text(l['label'] ?? 'Open'),
+                                          onPressed: () =>
+                                              _openUrl(l['url'] ?? ''),
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              ],
                             ],
                           ),
                         ),

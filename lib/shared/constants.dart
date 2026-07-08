@@ -1,40 +1,38 @@
-/// Laravel API base URL (no trailing slash), e.g. `https://api.example.com` or `http://10.0.2.2:8000`.
-/// Paths below include the `/api` prefix.
-/// Override at compile time:
-/// `flutter run --dart-define=API_BASE=https://your-laravel-host.com`
+/// Laravel API base URL (no trailing slash).
+/// Override: `flutter run --dart-define=API_BASE=https://your-host`
 class ApiConstants {
-  /// Primary API hostname (Apache vhost on VPS). Used as `Host` when base URL is the server IP.
-  static const String defaultApiVirtualHost = 'api.victorialush.com';
+  /// Primary API hostname (Apache vhost). Used as `Host` when base URL is the server IP.
+  static const String defaultApiVirtualHost = 'api.imartgroup.co.tz';
 
-  /// Alternate canonical host (.co.tz).
-  static const String alternateApiVirtualHost = 'api.victorialush.co.tz';
+  static const String alternateApiVirtualHost = 'sms-api.imartgroup.co.tz';
 
-  /// VPS IP — reachable when `api.*` DNS is not configured yet.
+  /// Fallback reachable base (configure DNS / proxy for production).
   static const String productionApiReachableBase = 'http://162.220.11.235';
 
-  /// HTTPS API via SMS portal proxy (`/api/v1` → Laravel). Works with public DNS today.
-  static const String productionApiBaseHttpsSms = 'https://sms.victorialush.co.tz';
+  /// HTTPS via iMart SMS portal proxy (`/api/v1` → Laravel).
+  static const String productionApiBaseHttpsSms = 'https://sms.imartgroup.co.tz';
 
-  /// Direct HTTPS API hosts (require DNS A record → VPS).
-  static const String productionApiBaseHttpsCom = 'https://api.victorialush.com';
-  static const String productionApiBaseHttpsTz = 'https://api.victorialush.co.tz';
+  static const String productionApiBaseHttpsCom = 'https://api.imartgroup.co.tz';
+  static const String productionApiBaseHttpsTz = 'https://sms-api.imartgroup.co.tz';
 
-  /// Virtual hosts to probe with [productionApiReachableBase] + `Host` header.
   static const List<String> apiVirtualHosts = [
     defaultApiVirtualHost,
     alternateApiVirtualHost,
   ];
 
-  /// Order: direct HTTPS (when DNS works) → SMS proxy → IP + virtual host.
+  /// Discovery order: local API first (dev), then hosted iMart endpoints.
   static const List<String> productionApiBaseCandidates = [
+    localLaravelApiBase,
     productionApiBaseHttpsCom,
     productionApiBaseHttpsTz,
     productionApiBaseHttpsSms,
     productionApiReachableBase,
   ];
 
-  /// Default for new installs.
-  static const String defaultLaravelApiBase = productionApiBaseHttpsSms;
+  /// Local Laravel (`php artisan serve`) for portal + app login on this machine.
+  static const String localLaravelApiBase = 'http://127.0.0.1:8000';
+
+  static const String defaultLaravelApiBase = localLaravelApiBase;
 
   @Deprecated('Use defaultApiVirtualHost')
   static const String defaultLaravelApiVirtualHost = defaultApiVirtualHost;
@@ -42,55 +40,58 @@ class ApiConstants {
   @Deprecated('Use productionApiBaseHttpsTz')
   static const String preferredLaravelApiBaseHttps = productionApiBaseHttpsTz;
 
-  /// Laravel JSON host only (no `/api` or `/api/v1`). Must serve `/api/v1/...` as JSON.
   static const String baseUrl = String.fromEnvironment(
     'API_BASE',
     defaultValue: defaultLaravelApiBase,
   );
 
-  /// SMSver1 users authenticate via Laravel `client/login` (same DB as portal).
+  /// Bump so upgrades clear stale hosts and pick local iMart API quickly.
+  static const int apiConfigVersion = 8;
+
   static const String loginPath = '/api/v1/client/login';
   static const String userPath = '/api/v1/user';
   static const String logoutPath = '/api/v1/logout';
 
-  /// Same sender rules as SmSver1 (`senders` Active + your `user_id` | Public | Global).
   static const String sendersListPath = '/api/v1/senders/list';
+  static const String sendersCreatePath = '/api/v1/senders';
+  static String senderByIdPath(int id) => '/api/v1/senders/$id';
   static const String sendersDebugPath = '/api/v1/senders/list/debug';
-  /// Current bound sender for the logged-in bind phone (GET).
   static const String senderPointerPath = '/api/v1/sender-pointers';
   static const String senderBindPath = '/api/v1/sender-pointers/bind';
-  /// Same URL as [senderBindPath]; use HTTP DELETE to clear the pointer for the logged-in bind phone.
   static const String senderUnbindPath = '/api/v1/sender-pointers/bind';
-  /// Victoria Lush **VLL SMS** Flutter client (`vll_sms`); bulk campaigns stay on SMSver1.
+
+  /// Multi listen filters (which sender IDs this device services).
+  static const String listenFiltersPath = '/api/v1/listen-filters';
+
+  static const String conversationsPath = '/api/v1/conversations';
+  static const String conversationThreadPath = '/api/v1/conversations/thread';
+
   static const String autoReplyListPath = '/api/v1/auto-replies/list';
   static const String autoReplyCreatePath = '/api/v1/auto-replies/create';
   static const String autoReplyUpdatePath = '/api/v1/auto-replies/update';
   static const String autoReplyDeletePath = '/api/v1/auto-replies/delete';
 
-  /// Single SMS (JSON: `from`, `message`, `to`).
   static const String smsSendSinglePath = '/api/v1/sms';
-  /// Bulk SMS (JSON: `from`, `message`, `recipients`).
   static const String smsSendBulkPath = '/api/v1/sms/send';
+  static const String smsStatusPath = '/api/v1/sms/status';
+  static const String healthPath = '/api/v1/health';
 
-  /// Inbound sync from device listener (JSON: `sender`, `sms`, `time`).
+  static const String replyTemplatesPath = '/api/v1/reply-templates';
+  static String replyTemplateByIdPath(int id) => '/api/v1/reply-templates/$id';
+  static const String replyTemplatesPrefsPath = '/api/v1/reply-templates/prefs';
+
   static const String interactPath = '/api/v1/interact';
   static const String markReadPath = '/api/v1/read';
 
-  /// Social registration check (APIs-only mode).
   static const String socialCheckPath = '/api/v1/social-checks/check';
   static const String socialBatchPath = '/api/v1/social-checks/batch';
   static const String socialRecentPath = '/api/v1/social-checks/recent';
   static String socialCheckByIdPath(int id) => '/api/v1/social-checks/$id';
 
-  /// Live polls mirrored to Laravel / SMSver1 (`audience_polls`).
   static const String pollsPath = '/api/v1/polls';
 
-  /// Public JSON probe (no auth); confirms this host is Laravel API, not SMS portal HTML.
-  static const String healthPath = '/api/v1/health';
-
-  /// Update manifest on SMS portal (edit when you publish a new APK + download link).
   static const String appUpdateManifestUrl = String.fromEnvironment(
     'APP_UPDATE_URL',
-    defaultValue: 'https://sms.victorialush.co.tz/app-update.json',
+    defaultValue: 'https://sms.imartgroup.co.tz/app-update.json',
   );
 }

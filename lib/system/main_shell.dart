@@ -1,19 +1,18 @@
 import 'package:flutter/material.dart';
 
+import '../services/desk_selection.dart';
 import '../services/inbound_sync_service.dart';
+import '../services/notification_capture_service.dart';
 import '../services/sms_inbound_listener.dart';
-import '../widgets/app_update_dialog.dart';
 import 'compose_screen.dart';
 import 'dashboard_tab.dart';
 import 'incoming_messages_screen.dart';
-import 'polls_screen.dart';
 import 'social_checks_screen.dart';
 
-/// Bottom navigation on phones; side rail on tablets/desktop for space and clarity.
+/// Business desk: Home · Inbox · Reply · Social
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
 
-  /// Width at or above this uses [NavigationRail] instead of bottom bar.
   static const double railBreakpoint = 720;
 
   @override
@@ -22,6 +21,7 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _index = 0;
+  final _composeKey = GlobalKey<ComposeScreenState>();
 
   @override
   void initState() {
@@ -29,9 +29,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     InboundSyncService.instance.startPeriodicRetry();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      InboundSyncService.instance.flushPending();
-      SmsInboundListener.instance.ensureStarted();
-      if (mounted) showAppUpdateDialogIfNeeded(context);
+      Future<void>.delayed(const Duration(milliseconds: 250), () {
+        InboundSyncService.instance.flushPending();
+        SmsInboundListener.instance.ensureStarted();
+        NotificationCaptureService.instance.ensureStarted();
+      });
     });
   }
 
@@ -40,6 +42,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     InboundSyncService.instance.stopPeriodicRetry();
     SmsInboundListener.instance.stop();
+    NotificationCaptureService.instance.stop();
     super.dispose();
   }
 
@@ -47,19 +50,47 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       InboundSyncService.instance.flushPending();
+      NotificationCaptureService.instance.ensureStarted();
     }
   }
 
-  static const _labels = ['Home', 'Compose', 'Inbox', 'Polls', 'Audience'];
+  void _openSocial({String? phone}) {
+    if (phone != null && phone.trim().isNotEmpty) {
+      SocialChecksScreen.requestPrefillPhone(phone.trim());
+    }
+    setState(() => _index = 3);
+  }
+
+  void _openReply(List<CapturedMessage> picks) {
+    if (picks.isNotEmpty) {
+      DeskSelection.instance.openReplyWith(picks);
+    }
+    setState(() => _index = 2);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _composeKey.currentState?.reloadFromDesk();
+    });
+  }
+
+  void _openReplyDesk() => _openReply([]);
 
   @override
   Widget build(BuildContext context) {
     final pages = [
-      const DashboardTab(),
-      ComposeScreen(onOpenTab: (i) => setState(() => _index = i)),
-      IncomingMessagesScreen(isActive: _index == 2),
-      PollsScreen(isActive: _index == 3),
-      SocialChecksScreen(isActive: _index == 4),
+      DashboardTab(
+        onOpenTab: (i) => setState(() => _index = i),
+        onOpenSocialLookup: _openSocial,
+        onOpenReply: _openReplyDesk,
+      ),
+      IncomingMessagesScreen(
+        isActive: _index == 1,
+        onOpenSocialLookup: _openSocial,
+        onOpenReply: _openReply,
+      ),
+      ComposeScreen(
+        key: _composeKey,
+        onOpenTab: (i) => setState(() => _index = i),
+      ),
+      SocialChecksScreen(isActive: _index == 3),
     ];
 
     final useRail = MediaQuery.sizeOf(context).width >= MainShell.railBreakpoint;
@@ -72,81 +103,61 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               selectedIndex: _index,
               onDestinationSelected: (i) => setState(() => _index = i),
               labelType: NavigationRailLabelType.all,
-              minWidth: 88,
-              destinations: [
+              destinations: const [
                 NavigationRailDestination(
-                  icon: const Icon(Icons.dashboard_outlined),
-                  selectedIcon: const Icon(Icons.dashboard),
-                  label: Text(_labels[0]),
+                  icon: Icon(Icons.home_outlined),
+                  selectedIcon: Icon(Icons.home),
+                  label: Text('Home'),
                 ),
                 NavigationRailDestination(
-                  icon: const Icon(Icons.radio_outlined),
-                  selectedIcon: const Icon(Icons.radio),
-                  label: Text(_labels[1]),
+                  icon: Icon(Icons.inbox_outlined),
+                  selectedIcon: Icon(Icons.inbox),
+                  label: Text('Inbox'),
                 ),
                 NavigationRailDestination(
-                  icon: const Icon(Icons.inbox_outlined),
-                  selectedIcon: const Icon(Icons.inbox),
-                  label: Text(_labels[2]),
+                  icon: Icon(Icons.reply_outlined),
+                  selectedIcon: Icon(Icons.reply),
+                  label: Text('Reply'),
                 ),
                 NavigationRailDestination(
-                  icon: const Icon(Icons.how_to_vote_outlined),
-                  selectedIcon: const Icon(Icons.how_to_vote),
-                  label: Text(_labels[3]),
-                ),
-                NavigationRailDestination(
-                  icon: const Icon(Icons.manage_search_outlined),
-                  selectedIcon: const Icon(Icons.manage_search),
-                  label: Text(_labels[4]),
+                  icon: Icon(Icons.travel_explore_outlined),
+                  selectedIcon: Icon(Icons.travel_explore),
+                  label: Text('Social'),
                 ),
               ],
             ),
             const VerticalDivider(width: 1, thickness: 1),
-            Expanded(
-              child: IndexedStack(
-                index: _index,
-                children: pages,
-              ),
-            ),
+            Expanded(child: IndexedStack(index: _index, children: pages)),
           ],
         ),
       );
     }
 
     return Scaffold(
-      body: IndexedStack(
-        index: _index,
-        children: pages,
-      ),
+      body: IndexedStack(index: _index, children: pages),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-        destinations: [
+        destinations: const [
           NavigationDestination(
-            icon: const Icon(Icons.dashboard_outlined),
-            selectedIcon: const Icon(Icons.dashboard),
-            label: _labels[0],
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'Home',
           ),
           NavigationDestination(
-            icon: const Icon(Icons.radio_outlined),
-            selectedIcon: const Icon(Icons.radio),
-            label: _labels[1],
+            icon: Icon(Icons.inbox_outlined),
+            selectedIcon: Icon(Icons.inbox),
+            label: 'Inbox',
           ),
           NavigationDestination(
-            icon: const Icon(Icons.inbox_outlined),
-            selectedIcon: const Icon(Icons.inbox),
-            label: _labels[2],
+            icon: Icon(Icons.reply_outlined),
+            selectedIcon: Icon(Icons.reply),
+            label: 'Reply',
           ),
           NavigationDestination(
-            icon: const Icon(Icons.how_to_vote_outlined),
-            selectedIcon: const Icon(Icons.how_to_vote),
-            label: _labels[3],
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.manage_search_outlined),
-            selectedIcon: const Icon(Icons.manage_search),
-            label: _labels[4],
+            icon: Icon(Icons.travel_explore_outlined),
+            selectedIcon: Icon(Icons.travel_explore),
+            label: 'Social',
           ),
         ],
       ),

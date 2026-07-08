@@ -1,15 +1,14 @@
-/// Radio dayparts (EAT). Matches Laravel [IncomingController::segmentForTime] and portal filters.
+/// Daypart buckets (EAT). Matches Laravel IncomingController::segmentForTime.
 class ShowSegmentUtils {
   ShowSegmentUtils._();
 
-  static const morning = 'Morning show';
-  static const afternoon = 'Afternoon show';
-  static const evening = 'Evening show';
-  static const night = 'Night show';
+  static const morning = 'Morning period';
+  static const afternoon = 'Afternoon period';
+  static const evening = 'Evening period';
+  static const night = 'Night period';
 
   static const allLabels = [morning, afternoon, evening, night];
 
-  /// Uses the device's local clock (studio handset should be set to Tanzania / EAT).
   static String labelForLocal(DateTime dt) {
     final minutes = dt.hour * 60 + dt.minute;
     if (minutes >= 360 && minutes < 720) {

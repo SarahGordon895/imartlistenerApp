@@ -6,7 +6,7 @@ import '../shared/branding.dart';
 import '../shared/themes.dart';
 
 /// Live audience polls: tallies SMS replies `1`–`4` or `vote N` from the local Inbox during the poll window.
-/// Created/updated polls sync to Laravel (`audience_polls`) for SMSver1 reporting.
+/// Created/updated polls sync to Laravel (`audience_polls`) for iMart SMS Portal reporting.
 class PollsScreen extends StatefulWidget {
   const PollsScreen({super.key, this.isActive = false});
 
@@ -75,7 +75,7 @@ class _PollsScreenState extends State<PollsScreen> {
               const Text(
                 'Listeners reply with 1, 2, 3, or 4 (or "vote 2"). '
                 'Votes are counted from Inbox SMS on this device during the poll window. '
-                'Each new poll is stored on SMSver1 when you are online.',
+                'Each new poll is stored on iMart SMS Portal when you are online.',
                 style: TextStyle(fontSize: 13),
               ),
               const SizedBox(height: 12),
@@ -281,7 +281,7 @@ class _PollsScreenState extends State<PollsScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Delete poll?'),
         content: const Text(
-            'Removes this poll from the device and from SMSver1 if it was synced.'),
+            'Removes this poll from the device and from iMart SMS Portal if it was synced.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           FilledButton(
@@ -366,7 +366,7 @@ class _PollsScreenState extends State<PollsScreen> {
                                 const SizedBox(height: 8),
                                 Text(
                                   'Counts use Inbox SMS on this device. '
-                                  'New and ended polls sync to the Victoria Lush API (SMSver1 database) for reports.',
+                                  'New and ended polls sync to the iMart SMS API (iMart SMS Portal database) for reports.',
                                   style: Theme.of(context).textTheme.bodySmall,
                                 ),
                                 const SizedBox(height: 8),

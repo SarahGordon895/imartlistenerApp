@@ -1,11 +1,11 @@
 {
-    "name": "VLL SMS Feedback",
-    "short_name": "VLL SMS",
+    "name": "iMart SMS Listener",
+    "short_name": "iMart SMS",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#C41E3A",
     "theme_color": "#C41E3A",
-    "description": "Victoria Lush VLL SMS (Flutter app vll_sms) — inbox sync, segment auto-replies, polls & audience checks stored with SMSver1. Bulk SMS stays on the SMSver1 portal.",
+    "description": "iMart Group Ltd SMS Listener — inbox sync by sender ID with the iMart SMS Portal.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

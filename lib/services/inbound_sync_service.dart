@@ -5,8 +5,9 @@ import 'package:http/http.dart' as http;
 import '../data/local_database.dart';
 import '../packages/http_requests.dart';
 import '../shared/constants.dart';
+import 'listen_filter_service.dart';
 
-/// Posts device-received SMS to Laravel `/api/interact` with retry + local queue.
+/// Posts device-received SMS / WhatsApp captures to Laravel `/interact` with retry.
 class InboundSyncService {
   InboundSyncService._();
   static final InboundSyncService instance = InboundSyncService._();
@@ -29,11 +30,28 @@ class InboundSyncService {
     required String sender,
     required String body,
     required DateTime timeReceived,
+  }) {
+    return onMessageReceived(
+      sender: sender,
+      body: body,
+      timeReceived: timeReceived,
+      channel: 'sms',
+    );
+  }
+
+  Future<void> onMessageReceived({
+    required String sender,
+    required String body,
+    required DateTime timeReceived,
+    String channel = 'sms',
+    String? contactName,
   }) async {
     final rowId = await LocalDatabase.instance.insertInbound(
       sender: sender,
       body: body,
       receivedAtMs: timeReceived.millisecondsSinceEpoch,
+      channel: channel,
+      contactName: contactName,
     );
     await _syncRow(rowId);
   }
@@ -65,6 +83,8 @@ class InboundSyncService {
 
     final sender = row['sender'] as String? ?? '';
     final body = row['body'] as String? ?? '';
+    final channel = row['channel'] as String? ?? 'sms';
+    final contactName = row['contact_name'] as String?;
     final receivedAt = row['received_at'] as int? ?? DateTime.now().millisecondsSinceEpoch;
     final dt = DateTime.fromMillisecondsSinceEpoch(receivedAt).toUtc();
 
@@ -75,12 +95,25 @@ class InboundSyncService {
     }
 
     try {
-      Future<http.Response> postInteract() {
-        return ApiClient.instance.postJson(ApiConstants.interactPath, {
+      Future<http.Response> postInteract() async {
+        final listenId = await ListenFilterService.instance.primaryListenSenderId();
+        final payload = <String, dynamic>{
           'sender': sender,
           'sms': body,
           'time': dt.toIso8601String(),
-        });
+          'channel': channel,
+        };
+        if (contactName != null && contactName.isNotEmpty) {
+          payload['contact_name'] = contactName;
+        }
+        if (listenId != null && listenId.isNotEmpty) {
+          payload['listen_sender_id'] = listenId;
+        }
+        final filters = await ListenFilterService.instance.getSelected();
+        if (filters.isNotEmpty) {
+          payload['listen_sender_ids'] = filters.toList();
+        }
+        return ApiClient.instance.postJson(ApiConstants.interactPath, payload);
       }
 
       var res = await postInteract();

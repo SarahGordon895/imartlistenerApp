@@ -1,7 +1,7 @@
 name: vll_sms
-description: Victoria Lush VLL SMS (rebuilt from alpha APK; matches tz.co.victorialush.vllsms).
+description: imartListener — business SMS + WhatsApp capture with manual reply (iMart Group Ltd).
 publish_to: "none"
-version: 1.0.10+13
+version: 1.4.0+17
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -29,10 +29,10 @@ dev_dependencies:
   flutter_launcher_icons: ^0.14.3
 
 flutter_launcher_icons:
-  # Dark Victoria Lush mark (cropped from brand strip) — same family as web favicon.
-  image_path: assets/vll-app-icon.png
-  adaptive_icon_background: "#1A1A1A"
-  adaptive_icon_foreground: assets/vll-app-icon.png
+  # Official iMart Group Ltd mark.
+  image_path: assets/imart-app-icon.png
+  adaptive_icon_background: "#0B2C5F"
+  adaptive_icon_foreground: assets/imart-app-icon.png
   remove_alpha_ios: true
   android: true
   ios: true
@@ -46,5 +46,9 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
   assets:
+    - assets/imart-logo.png
+    - assets/imart-logo-white.png
+    - assets/imart-app-icon.png
     - assets/vll-logo.png
     - assets/vll-logo-white.png
+    - assets/vll-app-icon.png

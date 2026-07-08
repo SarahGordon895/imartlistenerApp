@@ -3,56 +3,63 @@ import 'package:flutter/material.dart';
 import '../shared/branding.dart';
 import '../shared/themes.dart';
 
-/// Victoria Lush wordmark from packaged PNGs ([VllBranding.logoAsset] / [logoWhiteAsset]).
+/// Official iMart Group Ltd mark — clean plate, no crush/crop.
 enum VllLogoTone {
-  /// Full-color mark (transparent background) — login, light cards.
   onLightSurface,
-
-  /// White-glyph mark — crimson / dark gradients (home hero).
   onBrandField,
 }
 
 class VllBrandLogo extends StatelessWidget {
   const VllBrandLogo({
     super.key,
-    this.height = 72,
-    this.width,
-    this.fit = BoxFit.contain,
-    this.filterQuality = FilterQuality.high,
+    this.height = 88,
+    this.maxWidth = 240,
     this.tone = VllLogoTone.onLightSurface,
   });
 
   final double height;
-  final double? width;
-  final BoxFit fit;
-  final FilterQuality filterQuality;
+  final double maxWidth;
   final VllLogoTone tone;
-
-  String get _asset => tone == VllLogoTone.onBrandField
-      ? VllBranding.logoWhiteAsset
-      : VllBranding.logoAsset;
-
-  Color get _fallbackIconColor =>
-      tone == VllLogoTone.onBrandField ? Colors.white70 : AppTheme.lushRed;
 
   @override
   Widget build(BuildContext context) {
-    return Image.asset(
-      _asset,
+    final logo = Image.asset(
+      VllBranding.logoAsset,
       height: height,
-      width: width,
-      fit: fit,
-      filterQuality: filterQuality,
-      errorBuilder: (_, __, ___) => SizedBox(
-        height: height,
-        width: width ?? height,
-        child: Center(
-          child: Icon(
-            Icons.campaign_outlined,
-            size: height * 0.72,
-            color: _fallbackIconColor,
+      width: maxWidth,
+      fit: BoxFit.contain,
+      alignment: Alignment.center,
+      filterQuality: FilterQuality.high,
+      errorBuilder: (_, __, ___) => Icon(
+        Icons.public,
+        size: height * 0.65,
+        color: AppTheme.lushRed,
+      ),
+    );
+
+    // Always sit on a clean white card so red/navy wordmark stays crisp.
+    return Semantics(
+      label: VllBranding.company,
+      child: Container(
+        constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: height + 24),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: tone == VllLogoTone.onBrandField
+                ? Colors.white.withValues(alpha: 0.35)
+                : const Color(0xFFE6E8ED),
           ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: tone == VllLogoTone.onBrandField ? 0.18 : 0.06),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
+        child: logo,
       ),
     );
   }

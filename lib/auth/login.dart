@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -39,15 +40,20 @@ class _LoginPageState extends State<LoginPage> {
   void initState() {
     super.initState();
     _loadBaseUrl();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) showAppUpdateDialogIfNeeded(context);
-    });
+    // Skip remote update check on web (causes blank/hung Cursor browser when CDN is slow).
+    if (!kIsWeb) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) showAppUpdateDialogIfNeeded(context);
+      });
+    }
   }
 
   Future<void> _loadBaseUrl() async {
     try {
-      await ApiClient.instance.ensureProductionApiBase();
-      final url = await ApiClient.instance.getBaseUrl();
+      final url = await ApiClient.instance.getBaseUrl().timeout(
+        const Duration(seconds: 3),
+        onTimeout: () => ApiConstants.localLaravelApiBase,
+      );
       if (!mounted) return;
       setState(() {
         _baseUrl = url;
@@ -55,7 +61,10 @@ class _LoginPageState extends State<LoginPage> {
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _apiReady = false);
+      setState(() {
+        _baseUrl = ApiConstants.localLaravelApiBase;
+        _apiReady = true;
+      });
     }
   }
 
@@ -203,35 +212,34 @@ class _LoginPageState extends State<LoginPage> {
           children: [
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 16),
+              padding: const EdgeInsets.fromLTRB(20, 28, 20, 28),
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [AppTheme.lushRed, AppTheme.lushDark],
+                  colors: [AppTheme.lushRed, AppTheme.lushNavy],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
               ),
-              child: Center(
-                child: GestureDetector(
-                  onTap: _onLogoTap,
-                  child: LayoutBuilder(
-                    builder: (context, c) {
-                      final maxLogo = (c.maxWidth - 8).clamp(160.0, 280.0);
-                      return SizedBox(
-                        width: maxLogo,
-                        height: 60,
-                        child: const FittedBox(
-                          fit: BoxFit.contain,
-                          child: VllBrandLogo(
-                            tone: VllLogoTone.onBrandField,
-                            height: 56,
-                            width: 260,
-                          ),
-                        ),
-                      );
-                    },
+              child: Column(
+                children: [
+                  GestureDetector(
+                    onTap: _onLogoTap,
+                    child: const VllBrandLogo(
+                      tone: VllLogoTone.onBrandField,
+                      height: 96,
+                      maxWidth: 220,
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 12),
+                  Text(
+                    VllBranding.company,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.92),
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.3,
+                        ),
+                  ),
+                ],
               ),
             ),
             Expanded(
@@ -265,7 +273,15 @@ class _LoginPageState extends State<LoginPage> {
                                             .titleLarge
                                             ?.copyWith(
                                               fontWeight: FontWeight.w800,
-                                              color: AppTheme.lushDark,
+                                              color: AppTheme.lushNavy,
+                                            ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        VllBranding.loginSubtitle,
+                                        textAlign: TextAlign.center,
+                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                              color: Colors.black54,
                                             ),
                                       ),
                                       if (_apiReady == true) ...[

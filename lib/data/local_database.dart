@@ -23,7 +23,7 @@ class LocalDatabase {
     final path = p.join(dir, 'vll_sms.db');
     return openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: (db, version) async {
         await db.execute('''
 CREATE TABLE inbound_messages (
@@ -38,7 +38,10 @@ CREATE TABLE inbound_messages (
   portal_sender_id TEXT,
   segment TEXT,
   auto_reply_status TEXT,
-  server_incoming_id INTEGER
+  server_incoming_id INTEGER,
+  channel TEXT NOT NULL DEFAULT 'sms',
+  contact_name TEXT,
+  reply_status TEXT
 );
 ''');
         await db.execute('''
@@ -49,7 +52,9 @@ CREATE TABLE outbound_messages (
   body TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   api_success INTEGER NOT NULL DEFAULT 0,
-  api_message TEXT
+  api_message TEXT,
+  channel TEXT NOT NULL DEFAULT 'sms',
+  in_reply_to_incoming_id INTEGER
 );
 ''');
         await db.execute(
@@ -121,6 +126,28 @@ CREATE TABLE IF NOT EXISTS portal_senders (
                 'ALTER TABLE audience_polls ADD COLUMN sync_error TEXT');
           } catch (_) {}
         }
+        if (oldVersion < 6) {
+          try {
+            await db.execute(
+                "ALTER TABLE inbound_messages ADD COLUMN channel TEXT NOT NULL DEFAULT 'sms'");
+          } catch (_) {}
+          try {
+            await db.execute(
+                'ALTER TABLE inbound_messages ADD COLUMN contact_name TEXT');
+          } catch (_) {}
+          try {
+            await db.execute(
+                'ALTER TABLE inbound_messages ADD COLUMN reply_status TEXT');
+          } catch (_) {}
+          try {
+            await db.execute(
+                "ALTER TABLE outbound_messages ADD COLUMN channel TEXT NOT NULL DEFAULT 'sms'");
+          } catch (_) {}
+          try {
+            await db.execute(
+                'ALTER TABLE outbound_messages ADD COLUMN in_reply_to_incoming_id INTEGER');
+          } catch (_) {}
+        }
       },
     );
   }
@@ -165,6 +192,8 @@ CREATE TABLE IF NOT EXISTS portal_senders (
     required String sender,
     required String body,
     required int receivedAtMs,
+    String channel = 'sms',
+    String? contactName,
   }) async {
     final db = await database;
     return db.insert('inbound_messages', {
@@ -173,6 +202,9 @@ CREATE TABLE IF NOT EXISTS portal_senders (
       'received_at': receivedAtMs,
       'synced': 0,
       'sync_attempts': 0,
+      'channel': channel,
+      'contact_name': contactName,
+      'reply_status': 'awaiting_reply',
     });
   }
 
@@ -204,11 +236,15 @@ CREATE TABLE IF NOT EXISTS portal_senders (
     String? portalSender;
     String? segment;
     String? autoReply;
+    String? replyStatus;
+    String? channel;
     int? serverIncomingId;
     if (portalPayload != null) {
       portalSender = portalPayload['portal_sender_id']?.toString();
       segment = portalPayload['segment']?.toString();
       autoReply = portalPayload['auto_reply_status']?.toString();
+      replyStatus = portalPayload['reply_status']?.toString();
+      channel = portalPayload['channel']?.toString();
       final sid = portalPayload['incoming_id'];
       if (sid is int) {
         serverIncomingId = sid;
@@ -225,6 +261,8 @@ CREATE TABLE IF NOT EXISTS portal_senders (
         if (portalSender != null) 'portal_sender_id': portalSender,
         if (segment != null) 'segment': segment,
         if (autoReply != null) 'auto_reply_status': autoReply,
+        if (replyStatus != null) 'reply_status': replyStatus,
+        if (channel != null) 'channel': channel,
         if (serverIncomingId != null) 'server_incoming_id': serverIncomingId,
       },
       where: 'id = ?',
@@ -251,6 +289,8 @@ WHERE id = ?
     required String body,
     required bool apiSuccess,
     String? apiMessage,
+    String channel = 'sms',
+    int? inReplyToIncomingId,
   }) async {
     final db = await database;
     return db.insert('outbound_messages', {
@@ -260,6 +300,8 @@ WHERE id = ?
       'created_at': DateTime.now().millisecondsSinceEpoch,
       'api_success': apiSuccess ? 1 : 0,
       'api_message': apiMessage,
+      'channel': channel,
+      'in_reply_to_incoming_id': inReplyToIncomingId,
     });
   }
 
@@ -272,7 +314,7 @@ WHERE id = ?
     );
   }
 
-  /// KPIs for dashboard (local handset inbox cache).
+  /// Desk KPIs: total, today, awaiting reply, by channel.
   Future<Map<String, int>> inboundKpis() async {
     final db = await database;
     final total = Sqflite.firstIntValue(
@@ -296,19 +338,50 @@ WHERE id = ?
           ),
         ) ??
         0;
+    final sms = Sqflite.firstIntValue(
+          await db.rawQuery(
+            "SELECT COUNT(*) AS c FROM inbound_messages WHERE COALESCE(channel,'sms') = 'sms'",
+          ),
+        ) ??
+        0;
+    final whatsapp = Sqflite.firstIntValue(
+          await db.rawQuery(
+            "SELECT COUNT(*) AS c FROM inbound_messages WHERE channel = 'whatsapp'",
+          ),
+        ) ??
+        0;
+    final awaiting = Sqflite.firstIntValue(
+          await db.rawQuery(
+            "SELECT COUNT(*) AS c FROM inbound_messages WHERE COALESCE(reply_status,'awaiting_reply') = 'awaiting_reply' "
+            "OR COALESCE(auto_reply_status,'') = 'manual_pending'",
+          ),
+        ) ??
+        0;
     return {
       'total': total,
       'synced': synced,
       'pending': pending,
       'today': today,
+      'sms': sms,
+      'whatsapp': whatsapp,
+      'awaiting': awaiting,
     };
   }
 
-  /// Show-segment breakdown for audience analytics (portal-synced segment labels).
+  /// Channel breakdown for the business desk.
+  Future<List<Map<String, Object?>>> inboundChannelBreakdown() async {
+    final db = await database;
+    return db.rawQuery(
+      "SELECT COALESCE(NULLIF(TRIM(channel), ''), 'sms') AS ch, COUNT(*) AS c "
+      'FROM inbound_messages GROUP BY ch ORDER BY c DESC',
+    );
+  }
+
+  /// Legacy segment breakdown (kept for older caches).
   Future<List<Map<String, Object?>>> inboundSegmentBreakdown() async {
     final db = await database;
     return db.rawQuery(
-      'SELECT COALESCE(NULLIF(TRIM(segment), ""), "(no segment)") AS seg, COUNT(*) AS c '
+      'SELECT COALESCE(NULLIF(TRIM(segment), ""), "(none)") AS seg, COUNT(*) AS c '
       'FROM inbound_messages GROUP BY seg ORDER BY c DESC LIMIT 12',
     );
   }

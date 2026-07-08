@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -11,8 +13,9 @@ import 'wrapper.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   _initSqfliteForDesktop();
-  await ApiClient.instance.ensureProductionApiBase();
+  // Paint UI immediately — API host resolve happens in AppWrapper (non-blocking for local).
   runApp(const VllSmsApp());
+  unawaited(ApiClient.instance.ensureProductionApiBase());
 }
 
 /// Windows/Linux/macOS: use FFI sqlite (avoids VM-only `sqflite` default). Android/iOS unchanged.

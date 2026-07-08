@@ -2,17 +2,25 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
 import '../data/local_database.dart';
+import '../services/desk_selection.dart';
+import '../services/notification_capture_service.dart';
 import '../services/sms_inbound_listener.dart';
 import '../shared/branding.dart';
-import '../shared/show_segment.dart';
-import 'compose_screen.dart';
 
+/// Business inbox: SMS + WhatsApp captures → select → Reply or Social lookup.
 class IncomingMessagesScreen extends StatefulWidget {
-  const IncomingMessagesScreen({super.key, this.isActive = false});
+  const IncomingMessagesScreen({
+    super.key,
+    this.isActive = false,
+    this.onOpenSocialLookup,
+    this.onOpenReply,
+  });
 
-  /// When true, the Inbox tab is visible (used for first-open privacy copy).
   final bool isActive;
+  final void Function({String? phone})? onOpenSocialLookup;
+  final void Function(List<CapturedMessage> picks)? onOpenReply;
 
   @override
   State<IncomingMessagesScreen> createState() => _IncomingMessagesScreenState();
@@ -21,27 +29,36 @@ class IncomingMessagesScreen extends StatefulWidget {
 class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
   Future<List<Map<String, Object?>>>? _future;
   String? _listenError;
-  bool _privacyShown = false;
-  String? _segmentFilter;
+  String? _channelFilter;
+  String? _replyFilter;
   StreamSubscription<void>? _messageSub;
   StreamSubscription<String?>? _errorSub;
+  StreamSubscription<void>? _notifSub;
+  bool _notifEnabled = true;
+  bool _privacyShown = false;
+  bool _selectMode = false;
+  final Set<int> _selectedIds = {};
 
   @override
   void initState() {
     super.initState();
     _reload();
     SmsInboundListener.instance.ensureStarted();
-    _listenError = SmsInboundListener.instance.lastError;
+    NotificationCaptureService.instance.ensureStarted();
+    _listenError = SmsInboundListener.instance.lastError ??
+        NotificationCaptureService.instance.lastError;
     _messageSub = SmsInboundListener.instance.onMessage.listen((_) {
+      if (mounted) _reload();
+    });
+    _notifSub = NotificationCaptureService.instance.onMessage.listen((_) {
       if (mounted) _reload();
     });
     _errorSub = SmsInboundListener.instance.onError.listen((err) {
       if (!mounted) return;
       setState(() => _listenError = err);
     });
-    if (widget.isActive) {
-      _maybeShowPrivacy();
-    }
+    _refreshNotifStatus();
+    if (widget.isActive) _maybeShowPrivacy();
   }
 
   @override
@@ -49,7 +66,15 @@ class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
     super.didUpdateWidget(oldWidget);
     if (widget.isActive && !oldWidget.isActive) {
       _maybeShowPrivacy();
+      _refreshNotifStatus();
+      _reload();
     }
+  }
+
+  Future<void> _refreshNotifStatus() async {
+    final ok = await NotificationCaptureService.instance.isEnabled();
+    if (!mounted) return;
+    setState(() => _notifEnabled = ok);
   }
 
   Future<void> _maybeShowPrivacy() async {
@@ -60,11 +85,10 @@ class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('SMS access'),
+        title: const Text('Business message capture'),
         content: const Text(
-          'Real-time SMS dashboard: messages on this handset sync to the shared database (SmSver1 / API) '
-          'for your station team. Bind your on-air sender on Home. For live polls, ask listeners to reply '
-          'with 1–4 or “vote 2” — tallies appear under Polls. Filter by show segment below (EAT).',
+          'This phone captures customer SMS and (with Notification access) WhatsApp messages, '
+          'then syncs them to imartPortal for manual reply. Select messages → Reply tab → template or compose.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
@@ -77,96 +101,245 @@ class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
   void dispose() {
     _messageSub?.cancel();
     _errorSub?.cancel();
+    _notifSub?.cancel();
     super.dispose();
   }
 
   void _reload() {
     setState(() {
-      _future = LocalDatabase.instance.listInboundRecent(limit: 300);
+      _future = LocalDatabase.instance
+          .listInboundRecent(limit: 300)
+          .timeout(const Duration(seconds: 6), onTimeout: () => <Map<String, Object?>>[]);
     });
   }
 
-  /// Tanzania / EAT display: 24-hour clock (device should be set to Africa/Dar or Nairobi).
+  CapturedMessage _toCaptured(Map<String, Object?> r) {
+    return CapturedMessage(
+      phone: (r['sender'] as String? ?? '').trim(),
+      body: (r['body'] as String? ?? '').trim(),
+      channel: (r['channel'] as String? ?? 'sms'),
+      incomingId: r['server_incoming_id'] as int?,
+      localId: r['id'] as int?,
+      contactName: r['contact_name'] as String?,
+    );
+  }
+
+  List<CapturedMessage> _selectedFromRows(List<Map<String, Object?>> rows) {
+    final out = <CapturedMessage>[];
+    for (final r in rows) {
+      final id = r['id'] as int?;
+      if (id != null && _selectedIds.contains(id)) {
+        out.add(_toCaptured(r));
+      }
+    }
+    return out;
+  }
+
+  void _exitSelectMode() {
+    setState(() {
+      _selectMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelect(Map<String, Object?> r) {
+    final id = r['id'] as int?;
+    if (id == null) return;
+    setState(() {
+      _selectMode = true;
+      if (_selectedIds.contains(id)) {
+        _selectedIds.remove(id);
+        if (_selectedIds.isEmpty) _selectMode = false;
+      } else {
+        _selectedIds.add(id);
+      }
+    });
+  }
+
+  void _openReplyFor(List<CapturedMessage> picks) {
+    if (picks.isEmpty) return;
+    widget.onOpenReply?.call(picks);
+    _exitSelectMode();
+  }
+
+  void _openReplySingle(Map<String, Object?> r) {
+    _openReplyFor([_toCaptured(r)]);
+  }
+
   String _fmtTime(int? ms) {
     if (ms == null) return '';
     final t = DateTime.fromMillisecondsSinceEpoch(ms);
-    return '${t.day.toString().padLeft(2, '0')}/${t.month.toString().padLeft(2, '0')}/${t.year} '
+    return '${t.day.toString().padLeft(2, '0')}/${t.month.toString().padLeft(2, '0')} '
         '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
   }
 
-  String _segmentForRow(Map<String, Object?> r) {
-    final stored = r['segment'] as String?;
-    if (stored != null && stored.isNotEmpty) {
-      return stored;
-    }
-    final at = r['received_at'] as int?;
-    if (at == null) {
-      return '';
-    }
-    return ShowSegmentUtils.labelForLocal(DateTime.fromMillisecondsSinceEpoch(at));
+  String _replyLabel(Map<String, Object?> r) {
+    final status = (r['reply_status'] as String?) ?? '';
+    final ar = (r['auto_reply_status'] as String?) ?? '';
+    if (status == 'replied' || ar == 'manual_replied') return 'Replied';
+    return 'Needs reply';
   }
 
-  String _autoReplyLabel(String? code) {
-    if (code == null || code.isEmpty) {
-      return '';
+  List<Map<String, Object?>> _applyFilters(List<Map<String, Object?>> rows) {
+    var out = rows;
+    if (_channelFilter != null) {
+      out = out
+          .where((r) => (r['channel'] as String? ?? 'sms') == _channelFilter)
+          .toList();
     }
-    switch (code) {
-      case 'queued':
-        return 'Auto-reply queued';
-      case 'skipped_recent':
-        return 'Auto-reply skipped (recent)';
-      case 'skipped_no_template':
-        return 'No template';
-      case 'insufficient_balance':
-        return 'Balance low';
-      case 'failed_sender_row':
-        return 'Sender error';
-      case 'pending':
-        return 'Processing…';
-      default:
-        return code;
+    if (_replyFilter != null) {
+      out = out.where((r) {
+        final label = _replyLabel(r).toLowerCase();
+        if (_replyFilter == 'awaiting_reply') return label.contains('needs');
+        return label.contains('replied');
+      }).toList();
     }
+    return out;
   }
 
-  List<Map<String, Object?>> _applySegment(List<Map<String, Object?>> rows) {
-    if (_segmentFilter == null) {
-      return rows;
-    }
-    return rows.where((r) => _segmentForRow(r) == _segmentFilter).toList();
+  Future<void> _openSenderActions(Map<String, Object?> r) async {
+    final phone = (r['sender'] as String? ?? '').trim();
+    final name = (r['contact_name'] as String?)?.trim();
+    final channel = (r['channel'] as String? ?? 'sms');
+    final body = (r['body'] as String? ?? '').trim();
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('From phone',
+                    style: Theme.of(ctx).textTheme.labelMedium?.copyWith(color: Colors.black54)),
+                const SizedBox(height: 4),
+                Text(
+                  phone.isEmpty ? 'Unknown number' : phone,
+                  style: Theme.of(ctx).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                      ),
+                ),
+                if (name != null && name.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(name, style: Theme.of(ctx).textTheme.titleMedium),
+                ],
+                const SizedBox(height: 6),
+                Text(
+                  '${channel == 'whatsapp' ? 'WhatsApp' : 'SMS'} · captured on this phone',
+                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: Colors.black54),
+                ),
+                if (body.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(body, maxLines: 4, overflow: TextOverflow.ellipsis),
+                ],
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _openReplySingle(r);
+                  },
+                  icon: const Icon(Icons.reply),
+                  label: const Text('Reply (template / compose)'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: phone.isEmpty
+                      ? null
+                      : () {
+                          Navigator.pop(ctx);
+                          widget.onOpenSocialLookup?.call(phone: phone);
+                        },
+                  icon: const Icon(Icons.travel_explore),
+                  label: const Text('Social lookup (IG / FB)'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          '${VllBranding.appTitle} · Inbox',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: Text(_selectMode
+            ? '${VllBranding.appTitle} · ${_selectedIds.length} selected'
+            : '${VllBranding.appTitle} · Inbox'),
         actions: [
-          IconButton(
-            onPressed: _reload,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
-          ),
+          if (_selectMode) ...[
+            TextButton(
+              onPressed: _exitSelectMode,
+              child: const Text('Cancel', style: TextStyle(color: Colors.white)),
+            ),
+            IconButton(
+              tooltip: 'Reply to selected',
+              onPressed: _selectedIds.isEmpty
+                  ? null
+                  : () async {
+                      final snap = await _future;
+                      if (!mounted) return;
+                      _openReplyFor(_selectedFromRows(snap ?? []));
+                    },
+              icon: const Icon(Icons.reply),
+            ),
+          ] else
+            IconButton(
+              tooltip: 'Select messages',
+              onPressed: () => setState(() => _selectMode = true),
+              icon: const Icon(Icons.checklist),
+            ),
+          IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
         ],
       ),
-      body: LayoutBuilder(
-        builder: (context, c) {
-          final maxW = c.maxWidth > 900 ? 760.0 : c.maxWidth;
-          return Center(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: maxW),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
           if (_listenError != null)
             MaterialBanner(
               content: Text(_listenError!),
               actions: [
-                TextButton(onPressed: () => setState(() => _listenError = null), child: const Text('Dismiss')),
+                TextButton(
+                  onPressed: () => setState(() => _listenError = null),
+                  child: const Text('Dismiss'),
+                ),
               ],
+            ),
+          if (!kIsWeb &&
+              defaultTargetPlatform == TargetPlatform.android &&
+              !_notifEnabled)
+            MaterialBanner(
+              content: const Text(
+                'Enable Notification access to capture WhatsApp for this business phone.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () async {
+                    await NotificationCaptureService.instance.openSettings();
+                    await Future<void>.delayed(const Duration(seconds: 1));
+                    await _refreshNotifStatus();
+                    await NotificationCaptureService.instance.ensureStarted();
+                  },
+                  child: const Text('Enable'),
+                ),
+              ],
+            ),
+          if (_selectMode)
+            Material(
+              color: const Color(0xFFE8F4FF),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Text(
+                  'Tap messages to select. Then use Reply → pick a template or compose → send individual or bulk.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
             ),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -175,28 +348,37 @@ class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
               runSpacing: 4,
               children: [
                 FilterChip(
-                  label: const Text('All segments'),
-                  selected: _segmentFilter == null,
-                  onSelected: (_) => setState(() => _segmentFilter = null),
+                  label: const Text('All'),
+                  selected: _channelFilter == null && _replyFilter == null,
+                  onSelected: (_) => setState(() {
+                    _channelFilter = null;
+                    _replyFilter = null;
+                  }),
                 ),
-                for (final label in ShowSegmentUtils.allLabels)
-                  FilterChip(
-                    label: Text(label.replaceAll(' show', '')),
-                    selected: _segmentFilter == label,
-                    onSelected: (_) => setState(() => _segmentFilter = label),
-                  ),
+                FilterChip(
+                  label: const Text('SMS'),
+                  selected: _channelFilter == 'sms',
+                  onSelected: (_) => setState(() => _channelFilter = 'sms'),
+                ),
+                FilterChip(
+                  label: const Text('WhatsApp'),
+                  selected: _channelFilter == 'whatsapp',
+                  onSelected: (_) => setState(() => _channelFilter = 'whatsapp'),
+                ),
+                FilterChip(
+                  label: const Text('Needs reply'),
+                  selected: _replyFilter == 'awaiting_reply',
+                  onSelected: (v) =>
+                      setState(() => _replyFilter = v ? 'awaiting_reply' : null),
+                ),
+                FilterChip(
+                  label: const Text('Replied'),
+                  selected: _replyFilter == 'replied',
+                  onSelected: (v) => setState(() => _replyFilter = v ? 'replied' : null),
+                ),
               ],
             ),
           ),
-          if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Text(
-                'Messages are read from this phone’s SMS app, validated against your portal sender binding, '
-                'and stored in the shared incoming log. Open the Compose tab in VLL SMS to manage segment auto-replies.',
-                style: TextStyle(fontSize: 12),
-              ),
-            ),
           Expanded(
             child: FutureBuilder<List<Map<String, Object?>>>(
               future: _future,
@@ -207,15 +389,13 @@ class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
                 if (snap.hasError) {
                   return Center(child: Text('Error: ${snap.error}'));
                 }
-                final rows = _applySegment(snap.data ?? []);
+                final rows = _applyFilters(snap.data ?? []);
                 if (rows.isEmpty) {
-                  return Center(
+                  return const Center(
                     child: Padding(
-                      padding: const EdgeInsets.all(24),
+                      padding: EdgeInsets.all(24),
                       child: Text(
-                        _segmentFilter == null
-                            ? 'No listener SMS yet.\nOpen this tab during a show so the app can listen and sync to the portal.'
-                            : 'No messages in this segment.',
+                        'No customer messages yet.\nSMS and WhatsApp captures will show here.',
                         textAlign: TextAlign.center,
                       ),
                     ),
@@ -224,65 +404,99 @@ class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
                 return RefreshIndicator(
                   onRefresh: () async => _reload(),
                   child: ListView.separated(
-                    physics: const AlwaysScrollableScrollPhysics(),
                     itemCount: rows.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (context, i) {
                       final r = rows[i];
+                      final id = r['id'] as int?;
                       final phone = r['sender'] as String? ?? '';
+                      final name = r['contact_name'] as String?;
                       final body = r['body'] as String? ?? '';
-                      final at = r['received_at'] as int?;
+                      final channel = (r['channel'] as String? ?? 'sms');
                       final synced = (r['synced'] as int? ?? 0) == 1;
-                      final err = r['last_error'] as String?;
-                      final portalSid = r['portal_sender_id'] as String?;
-                      final seg = _segmentForRow(r);
-                      final ar = r['auto_reply_status'] as String?;
+                      final reply = _replyLabel(r);
+                      final selected = id != null && _selectedIds.contains(id);
                       return ListTile(
-                        title: Text(phone, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        selected: selected,
+                        leading: _selectMode
+                            ? Checkbox(
+                                value: selected,
+                                onChanged: (_) => _toggleSelect(r),
+                              )
+                            : CircleAvatar(
+                                backgroundColor: channel == 'whatsapp'
+                                    ? const Color(0xFF25D366)
+                                    : Theme.of(context).colorScheme.primary,
+                                child: Icon(
+                                  channel == 'whatsapp' ? Icons.chat : Icons.sms,
+                                  color: Colors.white,
+                                  size: 18,
+                                ),
+                              ),
+                        title: Text(
+                          phone.isEmpty ? 'Unknown sender' : phone,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (portalSid != null && portalSid.isNotEmpty)
-                              Text('On-air sender ID: $portalSid', style: Theme.of(context).textTheme.labelSmall),
-                            Text(body),
+                            if (name != null && name.isNotEmpty)
+                              Text(name,
+                                  style: const TextStyle(fontWeight: FontWeight.w600)),
+                            Text(body, maxLines: 2, overflow: TextOverflow.ellipsis),
+                            const SizedBox(height: 2),
+                            Text(
+                              _fmtTime(r['received_at'] as int?),
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
                             const SizedBox(height: 4),
                             Wrap(
                               spacing: 6,
-                              runSpacing: 4,
                               children: [
                                 Chip(
                                   visualDensity: VisualDensity.compact,
-                                  label: Text(seg.isEmpty ? 'Segment' : seg),
-                                  backgroundColor: Colors.blue.shade50,
+                                  label: Text(
+                                      channel == 'whatsapp' ? 'WhatsApp' : 'SMS'),
                                 ),
                                 Chip(
                                   visualDensity: VisualDensity.compact,
-                                  label: Text(synced ? 'Portal sync OK' : 'Pending sync'),
-                                  backgroundColor: synced ? Colors.green.shade50 : Colors.orange.shade50,
+                                  label: Text(reply),
+                                  backgroundColor: reply.contains('Needs')
+                                      ? Colors.orange.shade50
+                                      : Colors.green.shade50,
                                 ),
-                                if (synced && ar != null && ar.isNotEmpty)
-                                  Chip(
-                                    visualDensity: VisualDensity.compact,
-                                    label: Text(_autoReplyLabel(ar)),
-                                    backgroundColor: Colors.purple.shade50,
-                                  ),
-                                if (!synced && err != null && err.isNotEmpty)
-                                  Chip(
-                                    visualDensity: VisualDensity.compact,
-                                    label: Text(err, overflow: TextOverflow.ellipsis),
-                                    backgroundColor: Colors.red.shade50,
-                                  ),
+                                Chip(
+                                  visualDensity: VisualDensity.compact,
+                                  label: Text(synced ? 'Portal OK' : 'Pending sync'),
+                                ),
                               ],
                             ),
                           ],
                         ),
-                        trailing: Text(_fmtTime(at), style: Theme.of(context).textTheme.bodySmall),
+                        trailing: _selectMode
+                            ? null
+                            : IconButton(
+                                tooltip: 'Social lookup',
+                                onPressed: phone.isEmpty
+                                    ? null
+                                    : () => widget.onOpenSocialLookup
+                                        ?.call(phone: phone),
+                                icon: const Icon(Icons.travel_explore),
+                              ),
                         onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => ComposeScreen(prefillRecipient: phone),
-                            ),
-                          );
+                          if (_selectMode) {
+                            _toggleSelect(r);
+                          } else {
+                            _openSenderActions(r);
+                          }
+                        },
+                        onLongPress: () {
+                          if (!_selectMode) {
+                            _toggleSelect(r);
+                          }
                         },
                       );
                     },
@@ -291,11 +505,26 @@ class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
               },
             ),
           ),
-                ],
+          if (_selectMode && _selectedIds.isNotEmpty)
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: FilledButton.icon(
+                  onPressed: () async {
+                    final snap = await _future;
+                    if (!mounted) return;
+                    _openReplyFor(_selectedFromRows(snap ?? []));
+                  },
+                  icon: const Icon(Icons.reply),
+                  label: Text(
+                    _selectedIds.length == 1
+                        ? 'Reply to 1 number'
+                        : 'Bulk reply to ${_selectedIds.length} numbers',
+                  ),
+                ),
               ),
             ),
-          );
-        },
+        ],
       ),
     );
   }

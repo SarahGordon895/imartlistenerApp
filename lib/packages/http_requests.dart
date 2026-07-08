@@ -13,8 +13,11 @@ class ApiClient {
   ApiClient._();
 
   static final ApiClient instance = ApiClient._();
-  /// Slow shared hosting / first cold DB hit after login: allow extra headroom.
-  static const Duration _requestTimeout = Duration(seconds: 45);
+  /// Normal API calls (login, lists, send).
+  static const Duration _requestTimeout = Duration(seconds: 20);
+  /// Host discovery probes — fail fast so login stays snappy.
+  static const Duration _healthProbeTimeout = Duration(seconds: 2);
+  String? _cachedBaseUrl;
 
   static const _tokenKey = 'auth_token';
   static const _baseUrlKey = 'api_base_url';
@@ -22,7 +25,7 @@ class ApiClient {
   /// Bump when API host discovery rules change — clears stale saved URLs on upgrade.
   static const _apiConfigVersionKey = 'api_config_version';
   static const _apiVirtualHostKey = 'api_virtual_host';
-  static const _apiConfigVersion = 5;
+  static const _apiConfigVersion = ApiConstants.apiConfigVersion;
   /// Same as [ApiConstants.baseUrl] after compile-time `API_BASE` (see [ApiConstants.defaultLaravelApiBase]).
   static String get productionBaseUrl =>
       normalizeApiBaseUrl(ApiConstants.baseUrl);
@@ -49,16 +52,26 @@ class ApiClient {
     if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
       return true;
     }
-    // Only treat obvious local/dev loopback hosts as invalid for production builds.
-    return lower.contains('127.0.0.1') ||
+    // Allow local Laravel during development (127.0.0.1 / Android emulator).
+    if (lower.contains('127.0.0.1') ||
         lower.contains('localhost') ||
-        lower.contains('10.0.2.2');
+        lower.contains('10.0.2.2')) {
+      return false;
+    }
+    // Drop obsolete Victoria Lush hosts when running iMart.
+    if (lower.contains('victorialush')) {
+      return true;
+    }
+    return false;
   }
 
-  /// `api.*` hosts without public DNS — use VPS IP + `Host` header instead.
+  /// Hosts that need IP + `Host` header when DNS is missing (legacy + iMart).
   static bool isApiSubdomainWithoutDns(String host) {
     final h = host.toLowerCase();
-    return h == 'api.victorialush.co.tz' || h == 'api.victorialush.com';
+    return h == 'api.victorialush.co.tz' ||
+        h == 'api.victorialush.com' ||
+        h == 'api.imartgroup.co.tz' ||
+        h == 'sms-api.imartgroup.co.tz';
   }
 
   static bool _isIpv4Host(String host) {
@@ -106,12 +119,12 @@ class ApiClient {
   }
 
   /// True when base URL points at SMS portal *pages* (not Laravel JSON under `/api/v1/...`).
-  /// Host-only `https://sms.victorialush.co.tz` is valid — paths add `/api/v1` per request.
+  /// Host-only SMS portal root is valid — paths add `/api/v1` per request.
   static bool isSmsPortalHostMisusedAsApi(String url) {
     try {
       final uri = Uri.parse(url.trim());
       final host = uri.host.toLowerCase();
-      if (host != 'sms.victorialush.co.tz') {
+      if (host != 'sms.victorialush.co.tz' && host != 'sms.imartgroup.co.tz') {
         return false;
       }
       final path = uri.path.toLowerCase();
@@ -129,24 +142,48 @@ class ApiClient {
             : productionBaseUrl,
       );
 
-  /// Probe all production routes; persist first working base (+ virtual host when using IP).
+  bool _isLocalDevBase(String url) {
+    final lower = url.toLowerCase();
+    return lower.contains('127.0.0.1') ||
+        lower.contains('localhost') ||
+        lower.contains('10.0.2.2');
+  }
+
+  /// Probe candidates quickly; prefer compile-time / local base first.
   Future<String> discoverReachableApiBase() async {
     final prefs = await SharedPreferences.getInstance();
+    final preferred = <String>[
+      _defaultBaseUrl,
+      ApiConstants.localLaravelApiBase,
+      ...ApiConstants.productionApiBaseCandidates,
+    ];
+    final seen = <String>{};
 
-    for (final raw in ApiConstants.productionApiBaseCandidates) {
-      if (_isIpv4Host(Uri.parse(raw).host)) {
+    for (final raw in preferred) {
+      final base = normalizeApiBaseUrl(raw);
+      if (base.isEmpty || !seen.add(base)) continue;
+      if (_isIpv4Host(Uri.parse(base).host) &&
+          base != ApiConstants.productionApiReachableBase &&
+          !_isLocalDevBase(base)) {
         continue;
       }
       try {
-        final res = await getHealthAtBase(raw);
+        final res = await getHealthAtBase(base);
         if (isSuccess(res)) {
           await prefs.remove(_apiVirtualHostKey);
-          await setBaseUrl(raw);
-          return raw;
+          await setBaseUrl(base);
+          return base;
         }
       } catch (_) {
         /* try next */
       }
+    }
+
+    // Local-first failure: still bind to local so login errors are clear, not hung discovery.
+    if (_isLocalDevBase(_defaultBaseUrl)) {
+      await prefs.remove(_apiVirtualHostKey);
+      await setBaseUrl(_defaultBaseUrl);
+      return _defaultBaseUrl;
     }
 
     final ip = ApiConstants.productionApiReachableBase;
@@ -163,7 +200,7 @@ class ApiClient {
       }
     }
 
-    final fallback = ApiConstants.productionApiBaseHttpsSms;
+    final fallback = _defaultBaseUrl;
     await prefs.remove(_apiVirtualHostKey);
     await setBaseUrl(fallback);
     return fallback;
@@ -192,14 +229,27 @@ class ApiClient {
   }
 
   Future<String> getBaseUrl() async {
-    final saved = (await SharedPreferences.getInstance()).getString(_baseUrlKey)?.trim();
+    if (_cachedBaseUrl != null && _cachedBaseUrl!.isNotEmpty) {
+      return _cachedBaseUrl!;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_baseUrlKey)?.trim();
     if (saved != null && saved.isNotEmpty && !_savedBaseNeedsRediscovery(saved)) {
       final normalized = normalizeApiBaseUrl(saved);
+      // Trust a healthy local/compile-time URL without re-probing every call.
+      if (_isLocalDevBase(normalized) ||
+          normalized == normalizeApiBaseUrl(_defaultBaseUrl)) {
+        _cachedBaseUrl = normalized;
+        return normalized;
+      }
       if (await _healthOkForBase(normalized)) {
+        _cachedBaseUrl = normalized;
         return normalized;
       }
     }
-    return discoverReachableApiBase();
+    final found = await discoverReachableApiBase();
+    _cachedBaseUrl = found;
+    return found;
   }
 
   Future<void> _migrateApiConfigIfNeeded() async {
@@ -208,12 +258,25 @@ class ApiClient {
     if (v >= _apiConfigVersion) return;
     await prefs.remove(_baseUrlKey);
     await prefs.remove(_apiVirtualHostKey);
+    _cachedBaseUrl = null;
     await prefs.setInt(_apiConfigVersionKey, _apiConfigVersion);
   }
 
-  /// Pick a working API host before login (migrates broken `api.*` DNS / dead saved URLs).
+  /// Resolve API host once at startup. Local/dev prefers compile-time base immediately.
   Future<void> ensureProductionApiBase() async {
     await _migrateApiConfigIfNeeded();
+    final preferred = normalizeApiBaseUrl(_defaultBaseUrl);
+    if (_isLocalDevBase(preferred)) {
+      // Pin local immediately — do not wait on remote candidate timeouts.
+      await setBaseUrl(preferred);
+      // Background confirm without blocking UI.
+      unawaited(() async {
+        if (!await _healthOkForBase(preferred)) {
+          await discoverReachableApiBase();
+        }
+      }());
+      return;
+    }
     await getBaseUrl();
   }
 
@@ -221,6 +284,7 @@ class ApiClient {
     final prefs = await SharedPreferences.getInstance();
     final normalized = normalizeApiBaseUrl(url);
     if (isSmsPortalHostMisusedAsApi(normalized)) {
+      _cachedBaseUrl = _defaultBaseUrl;
       await prefs.setString(_baseUrlKey, _defaultBaseUrl);
       return;
     }
@@ -232,12 +296,14 @@ class ApiClient {
           _baseUrlKey,
           ApiConstants.productionApiReachableBase,
         );
+        _cachedBaseUrl = ApiConstants.productionApiReachableBase;
         return;
       }
       await prefs.remove(_apiVirtualHostKey);
     } catch (_) {
       await prefs.remove(_apiVirtualHostKey);
     }
+    _cachedBaseUrl = normalized;
     await prefs.setString(_baseUrlKey, normalized);
   }
 
@@ -299,7 +365,7 @@ class ApiClient {
           headers: headers,
         )
         .timeout(
-          _requestTimeout,
+          _healthProbeTimeout,
           onTimeout: () => throw _timeout(ApiConstants.healthPath),
         );
   }
@@ -520,7 +586,7 @@ class ApiClient {
     if (decoded is String && decoded.isNotEmpty) {
       final t = decoded.trimLeft();
       if (t.startsWith('<!DOCTYPE') || t.startsWith('<html')) {
-        return 'Server returned HTML instead of JSON. Use the Laravel API base URL, not sms.victorialush.co.tz. Tap the logo five times → admin PIN → API server.';
+        return 'Server returned HTML instead of JSON. Use the Laravel API base URL (or sms.imartgroup.co.tz with /api/v1). Tap the logo five times → admin PIN → API server.';
       }
       if (t.length > 280) {
         return '$fallbackPrefix (${response.statusCode}): non-JSON response (truncated). Check API base URL.';
