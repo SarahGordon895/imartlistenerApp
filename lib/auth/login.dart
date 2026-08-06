@@ -205,7 +205,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F3F5),
+      backgroundColor: AppTheme.canvas,
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -214,11 +214,7 @@ class _LoginPageState extends State<LoginPage> {
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(20, 28, 20, 28),
               decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [AppTheme.lushRed, AppTheme.lushNavy],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
+                color: AppTheme.lushNavy,
               ),
               child: Column(
                 children: [
@@ -226,17 +222,17 @@ class _LoginPageState extends State<LoginPage> {
                     onTap: _onLogoTap,
                     child: const VllBrandLogo(
                       tone: VllLogoTone.onBrandField,
-                      height: 96,
-                      maxWidth: 220,
+                      height: 88,
+                      maxWidth: 200,
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 14),
                   Text(
                     VllBranding.company,
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
                           color: Colors.white.withValues(alpha: 0.92),
                           fontWeight: FontWeight.w600,
-                          letterSpacing: 0.3,
+                          letterSpacing: 0.4,
                         ),
                   ),
                 ],
@@ -247,21 +243,21 @@ class _LoginPageState extends State<LoginPage> {
                 show: _busy,
                 child: LayoutBuilder(
                   builder: (context, c) {
-                    final maxW = c.maxWidth > 700 ? 520.0 : c.maxWidth;
+                    final maxW = c.maxWidth > 700 ? 480.0 : c.maxWidth;
                     final kb = MediaQuery.viewInsetsOf(context).bottom;
                     return Align(
                       alignment: Alignment.topCenter,
                       child: SingleChildScrollView(
-                        padding: EdgeInsets.fromLTRB(16, 20, 16, 20 + kb),
+                        padding: EdgeInsets.fromLTRB(16, 24, 16, 24 + kb),
                         child: ConstrainedBox(
                           constraints: BoxConstraints(maxWidth: maxW),
                           child: AutofillGroup(
                             child: Form(
                               key: _formKey,
                               child: Card(
-                                elevation: 2,
+                                elevation: 0,
                                 child: Padding(
-                                  padding: const EdgeInsets.all(20),
+                                  padding: const EdgeInsets.fromLTRB(22, 24, 22, 22),
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.stretch,
                                     children: [
@@ -272,16 +268,18 @@ class _LoginPageState extends State<LoginPage> {
                                             .textTheme
                                             .titleLarge
                                             ?.copyWith(
-                                              fontWeight: FontWeight.w800,
+                                              fontWeight: FontWeight.w700,
+                                              letterSpacing: -0.3,
                                               color: AppTheme.lushNavy,
                                             ),
                                       ),
-                                      const SizedBox(height: 4),
+                                      const SizedBox(height: 6),
                                       Text(
                                         VllBranding.loginSubtitle,
                                         textAlign: TextAlign.center,
                                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                              color: Colors.black54,
+                                              color: AppTheme.inkMuted,
+                                              height: 1.4,
                                             ),
                                       ),
                                       if (_apiReady == true) ...[

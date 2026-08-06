@@ -1,7 +1,7 @@
 name: vll_sms
 description: imartListener — business SMS + WhatsApp capture with manual reply (iMart Group Ltd).
 publish_to: "none"
-version: 1.4.0+17
+version: 1.4.3+20
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -21,6 +21,7 @@ dependencies:
   sqflite_common_ffi: ^2.3.3
   package_info_plus: ^8.0.2
   url_launcher: ^6.3.1
+  google_fonts: ^8.2.1
 
 dev_dependencies:
   flutter_test:

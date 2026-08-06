@@ -37,21 +37,36 @@ class MessageNotificationListener : NotificationListenerService() {
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim().orEmpty()
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim().orEmpty()
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim().orEmpty()
+        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim().orEmpty()
+        val summary = extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)?.toString()?.trim().orEmpty()
+        val infoText = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString()?.trim().orEmpty()
+        val lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            ?.mapNotNull { it?.toString()?.trim() }
+            ?.filter { it.isNotEmpty() }
+            .orEmpty()
         val body = when {
             bigText.isNotEmpty() -> bigText
+            lines.isNotEmpty() -> lines.joinToString("\n")
             text.isNotEmpty() -> text
+            summary.isNotEmpty() -> summary
             else -> return
         }
         if (body.isEmpty() || title.equals("WhatsApp", ignoreCase = true)) return
         // Skip group summary / reaction-only noise.
         if (body.equals("Checking for new messages", ignoreCase = true)) return
+        if (body.equals("WhatsApp Web is currently active", ignoreCase = true)) return
+        if (title.equals("WhatsApp Web", ignoreCase = true)) return
 
-        val phone = extractPhone(title) ?: extractPhone(body)
+        val phone = extractPhone(title)
+            ?: extractPhone(subText)
+            ?: extractPhone(infoText)
+            ?: extractPhone(body)
+            ?: extractPhone(lines.joinToString(" "))
         val payload = JSONObject()
             .put("channel", channel)
             .put("package", pkg)
             .put("sender", phone ?: "")
-            .put("contact_name", title)
+            .put("contact_name", title.ifEmpty { subText })
             .put("body", body)
             .put("time_ms", sbn.postTime)
             .toString()
@@ -60,11 +75,15 @@ class MessageNotificationListener : NotificationListenerService() {
     }
 
     private fun extractPhone(raw: String): String? {
-        val digits = raw.replace(Regex("[^0-9+]"), " ")
-        val match = Regex("(\\+?\\d[\\d\\s-]{8,}\\d)").find(digits)?.groupValues?.getOrNull(1)
-            ?: return null
-        val cleaned = match.replace(Regex("[^0-9]"), "")
-        return if (cleaned.length in 9..15) cleaned else null
+        if (raw.isBlank()) return null
+        // Prefer international / long digit runs first.
+        val candidates = Regex("(\\+?\\d[\\d\\s().-]{7,}\\d)").findAll(raw).map { it.value }.toList()
+        for (c in candidates) {
+            val cleaned = c.replace(Regex("[^0-9]"), "")
+            if (cleaned.length in 9..15) return cleaned
+        }
+        val digitsOnly = raw.replace(Regex("[^0-9]"), "")
+        return if (digitsOnly.length in 9..15) digitsOnly else null
     }
 
     companion object {

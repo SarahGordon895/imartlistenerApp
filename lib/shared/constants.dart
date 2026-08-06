@@ -15,13 +15,18 @@ class ApiConstants {
   static const String productionApiBaseHttpsCom = 'https://api.imartgroup.co.tz';
   static const String productionApiBaseHttpsTz = 'https://sms-api.imartgroup.co.tz';
 
+  /// Dedicated iMart Listener API domain on LipaPay hosting (production default).
+  static const String productionApiBaseLipaPay =
+      'https://listenerapi.lipapay.co.tz';
+
   static const List<String> apiVirtualHosts = [
     defaultApiVirtualHost,
     alternateApiVirtualHost,
   ];
 
-  /// Discovery order: local API first (dev), then hosted iMart endpoints.
+  /// Discovery order: hosted LipaPay first, then legacy, then local for dev.
   static const List<String> productionApiBaseCandidates = [
+    productionApiBaseLipaPay,
     localLaravelApiBase,
     productionApiBaseHttpsCom,
     productionApiBaseHttpsTz,
@@ -32,7 +37,7 @@ class ApiConstants {
   /// Local Laravel (`php artisan serve`) for portal + app login on this machine.
   static const String localLaravelApiBase = 'http://127.0.0.1:8000';
 
-  static const String defaultLaravelApiBase = localLaravelApiBase;
+  static const String defaultLaravelApiBase = productionApiBaseLipaPay;
 
   @Deprecated('Use defaultApiVirtualHost')
   static const String defaultLaravelApiVirtualHost = defaultApiVirtualHost;
@@ -45,8 +50,8 @@ class ApiConstants {
     defaultValue: defaultLaravelApiBase,
   );
 
-  /// Bump so upgrades clear stale hosts and pick local iMart API quickly.
-  static const int apiConfigVersion = 8;
+  /// Bump so upgrades clear stale hosts and pick LipaPay listener API quickly.
+  static const int apiConfigVersion = 12;
 
   static const String loginPath = '/api/v1/client/login';
   static const String userPath = '/api/v1/user';

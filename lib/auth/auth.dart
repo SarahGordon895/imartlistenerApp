@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:http/http.dart' as http;
 
 import '../packages/http_requests.dart';
+import '../services/listen_keyword_service.dart';
 import '../shared/constants.dart';
 
 class AuthService {
@@ -101,6 +102,10 @@ class AuthService {
       throw AuthException('Login succeeded but no token was returned.');
     }
     await _api.setToken(token);
+    // Pull portal listen filters (keyword / From / Sender IDs) for on-device apply.
+    try {
+      await ListenKeywordService.instance.refreshFromApi();
+    } catch (_) {}
     return token;
   }
 

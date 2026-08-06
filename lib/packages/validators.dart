@@ -12,9 +12,15 @@ class Validators {
     return null;
   }
 
-  /// Portal uses MD5 passwords; many legacy accounts are shorter than six characters.
+  /// Portal rule: min 8 chars, upper, lower, digit, special.
   static String? password(String? v) {
     if (v == null || v.trim().isEmpty) return 'Enter password';
+    final s = v;
+    if (s.length < 8) return 'Password must be at least 8 characters';
+    if (!RegExp(r'[A-Z]').hasMatch(s)) return 'Include an uppercase letter';
+    if (!RegExp(r'[a-z]').hasMatch(s)) return 'Include a lowercase letter';
+    if (!RegExp(r'[0-9]').hasMatch(s)) return 'Include a number';
+    if (!RegExp(r'[^A-Za-z0-9]').hasMatch(s)) return 'Include a special character';
     return null;
   }
 

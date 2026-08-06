@@ -6,6 +6,7 @@ import '../data/local_database.dart';
 import '../packages/http_requests.dart';
 import '../shared/constants.dart';
 import 'listen_filter_service.dart';
+import 'listen_keyword_service.dart';
 
 /// Posts device-received SMS / WhatsApp captures to Laravel `/interact` with retry.
 class InboundSyncService {
@@ -46,6 +47,20 @@ class InboundSyncService {
     String channel = 'sms',
     String? contactName,
   }) async {
+    // Portal is source of truth — refresh before applying (short timeout if offline).
+    try {
+      await ListenKeywordService.instance
+          .refreshFromApi()
+          .timeout(const Duration(seconds: 3));
+    } catch (_) {}
+
+    if (!await ListenKeywordService.instance.messageShouldListen(
+      body: body,
+      sender: sender,
+    )) {
+      return;
+    }
+
     final rowId = await LocalDatabase.instance.insertInbound(
       sender: sender,
       body: body,
@@ -146,6 +161,10 @@ class InboundSyncService {
           final d = m['data'];
           if (d is Map) {
             portalPayload = Map<String, dynamic>.from(d);
+            // API keyword skip: treat as intentional sync (do not retry).
+            if (portalPayload['skipped'] == true) {
+              srvMsg ??= 'Skipped (keyword filter)';
+            }
           }
         }
         await LocalDatabase.instance.markInboundSynced(

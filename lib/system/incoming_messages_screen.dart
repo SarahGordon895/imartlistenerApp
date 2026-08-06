@@ -180,6 +180,20 @@ class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
     return 'Needs reply';
   }
 
+  Widget _metaPill(String label, Color bg) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+
   List<Map<String, Object?>> _applyFilters(List<Map<String, Object?>> rows) {
     var out = rows;
     if (_channelFilter != null) {
@@ -418,6 +432,7 @@ class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
                       final selected = id != null && _selectedIds.contains(id);
                       return ListTile(
                         selected: selected,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         leading: _selectMode
                             ? Checkbox(
                                 value: selected,
@@ -426,56 +441,74 @@ class _IncomingMessagesScreenState extends State<IncomingMessagesScreen> {
                             : CircleAvatar(
                                 backgroundColor: channel == 'whatsapp'
                                     ? const Color(0xFF25D366)
-                                    : Theme.of(context).colorScheme.primary,
+                                    : const Color(0xFF0B2C5F),
                                 child: Icon(
                                   channel == 'whatsapp' ? Icons.chat : Icons.sms,
                                   color: Colors.white,
                                   size: 18,
                                 ),
                               ),
-                        title: Text(
-                          phone.isEmpty ? 'Unknown sender' : phone,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.3,
-                          ),
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                phone.isEmpty
+                                    ? (name?.isNotEmpty == true ? name! : 'Unknown sender')
+                                    : phone,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              _fmtTime(r['received_at'] as int?),
+                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: Colors.black54,
+                                  ),
+                            ),
+                          ],
                         ),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (name != null && name.isNotEmpty)
+                            if (name != null &&
+                                name.isNotEmpty &&
+                                phone.isNotEmpty) ...[
+                              const SizedBox(height: 2),
                               Text(name,
                                   style: const TextStyle(fontWeight: FontWeight.w600)),
-                            Text(body, maxLines: 2, overflow: TextOverflow.ellipsis),
+                            ],
                             const SizedBox(height: 2),
-                            Text(
-                              _fmtTime(r['received_at'] as int?),
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                            const SizedBox(height: 4),
-                            Wrap(
-                              spacing: 6,
+                            Text(body, maxLines: 2, overflow: TextOverflow.ellipsis),
+                            const SizedBox(height: 8),
+                            Row(
                               children: [
-                                Chip(
-                                  visualDensity: VisualDensity.compact,
-                                  label: Text(
-                                      channel == 'whatsapp' ? 'WhatsApp' : 'SMS'),
+                                _metaPill(
+                                  channel == 'whatsapp' ? 'WhatsApp' : 'SMS',
+                                  channel == 'whatsapp'
+                                      ? const Color(0xFFE8F8EF)
+                                      : const Color(0xFFEEF2F7),
                                 ),
-                                Chip(
-                                  visualDensity: VisualDensity.compact,
-                                  label: Text(reply),
-                                  backgroundColor: reply.contains('Needs')
-                                      ? Colors.orange.shade50
-                                      : Colors.green.shade50,
+                                const SizedBox(width: 6),
+                                _metaPill(
+                                  reply,
+                                  reply.contains('Needs')
+                                      ? const Color(0xFFFFF4E5)
+                                      : const Color(0xFFE8F8EF),
                                 ),
-                                Chip(
-                                  visualDensity: VisualDensity.compact,
-                                  label: Text(synced ? 'Portal OK' : 'Pending sync'),
+                                const SizedBox(width: 6),
+                                _metaPill(
+                                  synced ? 'Synced' : 'Pending',
+                                  synced
+                                      ? const Color(0xFFEAF2FF)
+                                      : const Color(0xFFF2F4F7),
                                 ),
                               ],
                             ),
                           ],
                         ),
+                        isThreeLine: true,
                         trailing: _selectMode
                             ? null
                             : IconButton(

@@ -29,10 +29,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "tz.co.victorialush.vllsms"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        applicationId = "tz.co.imartgroup.imartlistener"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -43,28 +40,35 @@ android {
     productFlavors {
         create("prod") {
             dimension = "distribution"
-            applicationId = "tz.co.victorialush.vllsms"
+            applicationId = "tz.co.imartgroup.imartlistener"
             minSdk = flutter.minSdkVersion
         }
         create("compat") {
             dimension = "distribution"
-            // Fallback build for install conflicts / older Android devices.
-            applicationId = "tz.co.victorialush.vllsms.compat"
+            // Separate ID if an older / conflicting build is already installed.
+            applicationId = "tz.co.imartgroup.imartlistener.compat"
             minSdk = flutter.minSdkVersion
+        }
+    }
+
+    signingConfigs {
+        if (keystorePropertiesFile.exists()) {
+            create("release") {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
         }
     }
 
     buildTypes {
         release {
             signingConfig = if (keystorePropertiesFile.exists()) {
-                signingConfigs.create("release") {
-                    keyAlias = keystoreProperties["keyAlias"] as String
-                    keyPassword = keystoreProperties["keyPassword"] as String
-                    storeFile = file(keystoreProperties["storeFile"] as String)
-                    storePassword = keystoreProperties["storePassword"] as String
-                    enableV1Signing = true
-                    enableV2Signing = true
-                }
+                signingConfigs.getByName("release")
             } else {
                 // Local fallback only; production should always use key.properties + upload keystore.
                 signingConfigs.getByName("debug")

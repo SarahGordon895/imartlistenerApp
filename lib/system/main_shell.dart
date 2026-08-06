@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/desk_selection.dart';
 import '../services/inbound_sync_service.dart';
+import '../services/listen_keyword_service.dart';
 import '../services/notification_capture_service.dart';
 import '../services/sms_inbound_listener.dart';
 import 'compose_screen.dart';
@@ -13,7 +14,8 @@ import 'social_checks_screen.dart';
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
 
-  static const double railBreakpoint = 720;
+  static const double railBreakpoint = 700;
+  static const double wideBreakpoint = 1100;
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -30,6 +32,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     InboundSyncService.instance.startPeriodicRetry();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future<void>.delayed(const Duration(milliseconds: 250), () {
+        ListenKeywordService.instance.refreshFromApi();
         InboundSyncService.instance.flushPending();
         SmsInboundListener.instance.ensureStarted();
         NotificationCaptureService.instance.ensureStarted();
@@ -49,7 +52,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      ListenKeywordService.instance.refreshFromApi();
       InboundSyncService.instance.flushPending();
+      SmsInboundListener.instance.ensureStarted();
       NotificationCaptureService.instance.ensureStarted();
     }
   }
@@ -94,47 +99,63 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     ];
 
     final useRail = MediaQuery.sizeOf(context).width >= MainShell.railBreakpoint;
+    final wide = MediaQuery.sizeOf(context).width >= MainShell.wideBreakpoint;
 
     if (useRail) {
       return Scaffold(
-        body: Row(
-          children: [
-            NavigationRail(
-              selectedIndex: _index,
-              onDestinationSelected: (i) => setState(() => _index = i),
-              labelType: NavigationRailLabelType.all,
-              destinations: const [
-                NavigationRailDestination(
-                  icon: Icon(Icons.home_outlined),
-                  selectedIcon: Icon(Icons.home),
-                  label: Text('Home'),
+        body: SafeArea(
+          child: Row(
+            children: [
+              NavigationRail(
+                extended: wide,
+                selectedIndex: _index,
+                onDestinationSelected: (i) => setState(() => _index = i),
+                labelType: wide
+                    ? NavigationRailLabelType.none
+                    : NavigationRailLabelType.all,
+                destinations: const [
+                  NavigationRailDestination(
+                    icon: Icon(Icons.home_outlined),
+                    selectedIcon: Icon(Icons.home),
+                    label: Text('Home'),
+                  ),
+                  NavigationRailDestination(
+                    icon: Icon(Icons.inbox_outlined),
+                    selectedIcon: Icon(Icons.inbox),
+                    label: Text('Inbox'),
+                  ),
+                  NavigationRailDestination(
+                    icon: Icon(Icons.reply_outlined),
+                    selectedIcon: Icon(Icons.reply),
+                    label: Text('Reply'),
+                  ),
+                  NavigationRailDestination(
+                    icon: Icon(Icons.travel_explore_outlined),
+                    selectedIcon: Icon(Icons.travel_explore),
+                    label: Text('Social'),
+                  ),
+                ],
+              ),
+              const VerticalDivider(width: 1, thickness: 1),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1100),
+                    child: IndexedStack(index: _index, children: pages),
+                  ),
                 ),
-                NavigationRailDestination(
-                  icon: Icon(Icons.inbox_outlined),
-                  selectedIcon: Icon(Icons.inbox),
-                  label: Text('Inbox'),
-                ),
-                NavigationRailDestination(
-                  icon: Icon(Icons.reply_outlined),
-                  selectedIcon: Icon(Icons.reply),
-                  label: Text('Reply'),
-                ),
-                NavigationRailDestination(
-                  icon: Icon(Icons.travel_explore_outlined),
-                  selectedIcon: Icon(Icons.travel_explore),
-                  label: Text('Social'),
-                ),
-              ],
-            ),
-            const VerticalDivider(width: 1, thickness: 1),
-            Expanded(child: IndexedStack(index: _index, children: pages)),
-          ],
+              ),
+            ],
+          ),
         ),
       );
     }
 
     return Scaffold(
-      body: IndexedStack(index: _index, children: pages),
+      body: SafeArea(
+        child: IndexedStack(index: _index, children: pages),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),

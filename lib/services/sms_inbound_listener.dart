@@ -26,9 +26,15 @@ class SmsInboundListener {
   String? get lastError => _lastError;
   bool get isStarted => _started;
 
-  Future<void> ensureStarted() async {
-    if (_started || _starting) return;
+  Future<void> ensureStarted({bool force = false}) async {
+    if ((_started && !force) || _starting) return;
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+
+    if (force && _started) {
+      _readsms?.dispose();
+      _readsms = null;
+      _started = false;
+    }
 
     _starting = true;
     try {

@@ -8,11 +8,11 @@ import '../auth/login.dart';
 import '../data/local_database.dart';
 import '../packages/http_requests.dart';
 import '../services/listen_filter_service.dart';
+import '../services/listen_keyword_service.dart';
 import '../services/listening_notification.dart';
 import '../services/notification_capture_service.dart';
 import '../shared/branding.dart';
 import '../shared/constants.dart';
-import '../shared/flyer_copy.dart';
 import '../shared/portal_sender.dart';
 import '../shared/sender_api_payload.dart';
 import '../shared/themes.dart';
@@ -45,6 +45,9 @@ class _DashboardTabState extends State<DashboardTab> {
   List<_SenderOption> _senders = [];
   _SenderOption? _selected;
   Set<String> _listenFilters = {};
+  String _listenKeyword = '';
+  bool _listenKeywordEnabled = true;
+  List<String> _listenFromNumbers = [];
   bool _notifCaptureEnabled = true;
   String? _portalPhone;
   Map<String, int> _kpis = {};
@@ -101,23 +104,17 @@ class _DashboardTabState extends State<DashboardTab> {
   }
 
   Future<void> _loadListenFilters() async {
+    // Portal / API is source of truth — display only in the app.
+    await ListenKeywordService.instance.refreshFromApi();
     final selected = await ListenFilterService.instance.getSelected();
+    final cur = await ListenKeywordService.instance.current();
     if (!mounted) return;
-    setState(() => _listenFilters = selected);
-  }
-
-  Future<void> _toggleListenFilter(String senderId) async {
-    await ListenFilterService.instance.toggle(senderId);
-    await _loadListenFilters();
-    try {
-      await ApiClient.instance.postJson(ApiConstants.listenFiltersPath, {
-        'sender_ids': _listenFilters.toList(),
-      });
-    } catch (_) {}
-    if (!mounted) return;
-    showToast(_listenFilters.isEmpty
-        ? 'Capturing under default bound sender.'
-        : 'Sender filters: ${_listenFilters.length}');
+    setState(() {
+      _listenFilters = selected;
+      _listenKeyword = cur.keyword;
+      _listenKeywordEnabled = cur.enabled;
+      _listenFromNumbers = List<String>.from(cur.fromNumbers);
+    });
   }
 
   Future<void> _loadKpis() async {
@@ -234,6 +231,7 @@ class _DashboardTabState extends State<DashboardTab> {
 
   @override
   Widget build(BuildContext context) {
+    final bottom = MediaQuery.paddingOf(context).bottom;
     return Scaffold(
       appBar: AppBar(
         title: const Text(VllBranding.appTitle),
@@ -256,20 +254,15 @@ class _DashboardTabState extends State<DashboardTab> {
           onRefresh: _bootstrap,
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            padding: EdgeInsets.fromLTRB(16, 12, 16, 24 + bottom),
             children: [
               _hero(),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
               _deskStats(),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
               _setupCard(),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
               _actions(),
-              const SizedBox(height: 16),
-              Text(
-                FlyerCopy.headline,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
-              ),
             ],
           ),
         ),
@@ -277,36 +270,89 @@ class _DashboardTabState extends State<DashboardTab> {
     );
   }
 
+  Widget _sectionShell({required String title, String? subtitle, required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: AppTheme.line),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(title,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.lushNavy,
+                  )),
+          if (subtitle != null) ...[
+            const SizedBox(height: 4),
+            Text(subtitle,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppTheme.inkMuted,
+                      height: 1.35,
+                    )),
+          ],
+          const SizedBox(height: 12),
+          child,
+        ],
+      ),
+    );
+  }
+
   Widget _hero() {
     return Container(
-      padding: const EdgeInsets.all(18),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [AppTheme.lushRed, AppTheme.lushNavy.withValues(alpha: 0.95)],
+          colors: [
+            AppTheme.lushNavy,
+            AppTheme.lushNavy.withValues(alpha: 0.92),
+            AppTheme.lushRed.withValues(alpha: 0.88),
+          ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(18),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const VllBrandLogo(tone: VllLogoTone.onBrandField, height: 72, maxWidth: 200),
-          const SizedBox(height: 10),
+          const VllBrandLogo(tone: VllLogoTone.onBrandField, height: 44, maxWidth: 160),
+          const SizedBox(height: 14),
           Text(
             VllBranding.appTitle,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
+                  letterSpacing: -0.4,
                 ),
           ),
           const SizedBox(height: 6),
           Text(
             VllBranding.homeHeroSubtitle,
-            textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.92),
+                  color: Colors.white.withValues(alpha: 0.9),
+                  height: 1.35,
                 ),
           ),
+          if (_portalPhone != null && _portalPhone!.trim().isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                'Business phone · ${_portalPhone!}',
+                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -317,80 +363,70 @@ class _DashboardTabState extends State<DashboardTab> {
     final today = _kpis['today'] ?? 0;
     final sms = _kpis['sms'] ?? 0;
     final wa = _kpis['whatsapp'] ?? 0;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        border: Border.all(color: const Color(0xFFE6E8ED)),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Desk today',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _stat('Needs reply', '$awaiting', Colors.orange.shade50),
-              _stat('Today', '$today', Colors.blue.shade50),
-              _stat('SMS', '$sms', Colors.grey.shade100),
-              _stat('WhatsApp', '$wa', const Color(0xFFE8F8EF)),
-              _stat('Gateway', _smsDriverLabel, const Color(0xFFF3F0FF)),
-            ],
-          ),
-        ],
+    final items = [
+      ('Needs reply', '$awaiting', const Color(0xFFFFF4E5)),
+      ('Today', '$today', const Color(0xFFEAF2FF)),
+      ('SMS', '$sms', const Color(0xFFF2F4F7)),
+      ('WhatsApp', '$wa', const Color(0xFFE8F8EF)),
+    ];
+    return _sectionShell(
+      title: 'Desk today',
+      subtitle: _smsDriverLabel,
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final cols = c.maxWidth >= 520 ? 4 : 2;
+          const gap = 10.0;
+          final w = (c.maxWidth - gap * (cols - 1)) / cols;
+          return Wrap(
+            spacing: gap,
+            runSpacing: gap,
+            children: items
+                .map((e) => SizedBox(
+                      width: w,
+                      child: _stat(e.$1, e.$2, e.$3),
+                    ))
+                .toList(),
+          );
+        },
       ),
     );
   }
 
   Widget _stat(String label, String value, Color bg) {
     return Container(
-      width: 150,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 12, color: Colors.black54)),
-          Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          Text(label,
+              style: const TextStyle(fontSize: 12, color: AppTheme.inkMuted, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          Text(value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppTheme.lushNavy)),
         ],
       ),
     );
   }
 
   Widget _setupCard() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        border: Border.all(color: const Color(0xFFE6E8ED)),
-        borderRadius: BorderRadius.circular(12),
-      ),
+    return _sectionShell(
+      title: 'Capture setup',
+      subtitle:
+          'Bind a Sender ID for SMS replies. Allow SMS permission and Notification access so WhatsApp chats sync to Inbox.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('1 · Capture setup',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 6),
-          Text(
-            'Bind the Sender ID used for SMS replies. On Android, allow SMS + Notification access so WhatsApp chats to this phone appear in Inbox.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
-          ),
-          if (_portalPhone != null && _portalPhone!.trim().isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text('Bound phone: ${_portalPhone!}',
-                style: Theme.of(context).textTheme.labelMedium),
-          ],
           if (!_notifCaptureEnabled &&
               !kIsWeb &&
               defaultTargetPlatform == TargetPlatform.android) ...[
-            const SizedBox(height: 10),
             Container(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: const Color(0xFFFFF4E5),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: const Color(0xFFFFD8A8)),
               ),
               child: Column(
@@ -400,10 +436,10 @@ class _DashboardTabState extends State<DashboardTab> {
                       style: TextStyle(fontWeight: FontWeight.w700)),
                   const SizedBox(height: 4),
                   const Text(
-                    'Enable Notification access for imartListener to capture Instagram / WhatsApp business chats.',
-                    style: TextStyle(fontSize: 12),
+                    'Turn on Notification access for imartListener to capture WhatsApp business chats.',
+                    style: TextStyle(fontSize: 12, height: 1.35),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   FilledButton.tonal(
                     onPressed: () async {
                       await NotificationCaptureService.instance.openSettings();
@@ -415,25 +451,30 @@ class _DashboardTabState extends State<DashboardTab> {
                 ],
               ),
             ),
+            const SizedBox(height: 12),
           ],
-          const SizedBox(height: 12),
           if (_senderLoading)
-            const Center(child: CircularProgressIndicator())
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Center(child: CircularProgressIndicator()),
+            )
           else if (_senders.isEmpty)
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
-                  'No Sender IDs yet. Add one in SMS settings — gateway credentials stay in API .env.',
+                  'No Sender IDs yet. Add one in the portal SMS settings (type or select) or below.',
                 ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const SmsSettingsScreen(),
-                      ),
-                    ).then((_) => _loadSenders());
+                    Navigator.of(context)
+                        .push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const SmsSettingsScreen(),
+                          ),
+                        )
+                        .then((_) => _loadSenders());
                   },
                   icon: const Icon(Icons.add),
                   label: const Text('Add Sender ID'),
@@ -444,37 +485,54 @@ class _DashboardTabState extends State<DashboardTab> {
             DropdownButtonFormField<_SenderOption>(
               // ignore: deprecated_member_use
               value: _selected,
+              isExpanded: true,
               items: _senders
-                  .map((e) => DropdownMenuItem(value: e, child: Text(e.label)))
+                  .map((e) => DropdownMenuItem(
+                        value: e,
+                        child: Text(e.label, overflow: TextOverflow.ellipsis),
+                      ))
                   .toList(),
               onChanged: (v) => setState(() => _selected = v),
               decoration: const InputDecoration(
                 labelText: 'SMS reply Sender ID',
-                border: OutlineInputBorder(),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppTheme.lushRed),
               onPressed: _working ? null : _bindSender,
               child: const Text('Bind Sender ID'),
             ),
-            const SizedBox(height: 8),
-            Text('Optional: limit which Sender IDs this phone files under',
-                style: Theme.of(context).textTheme.labelMedium),
+            const SizedBox(height: 14),
+            Text('Portal listen filters',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: AppTheme.lushNavy,
+                      fontWeight: FontWeight.w700,
+                    )),
             const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _senders.map((s) {
-                final selected = _listenFilters.contains(s.senderId);
-                return FilterChip(
-                  selected: selected,
-                  label: Text(s.senderId),
-                  onSelected: (_) => _toggleListenFilter(s.senderId),
-                );
-              }).toList(),
+            Text(
+              _listenKeywordEnabled
+                  ? 'Keyword · $_listenKeyword'
+                  : 'Keyword · off (accept all / From rules)',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
+            Text(
+              _listenFromNumbers.isEmpty
+                  ? 'Allowed From · none'
+                  : 'Allowed From · ${_listenFromNumbers.join(', ')}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            if (_listenFilters.isEmpty)
+              Text(
+                'Filing Sender IDs · bound Sender ID',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.inkMuted),
+              )
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _listenFilters.map((id) => Chip(label: Text(id))).toList(),
+              ),
           ],
         ],
       ),
@@ -482,40 +540,40 @@ class _DashboardTabState extends State<DashboardTab> {
   }
 
   Widget _actions() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text('2 · Work the desk',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-        const SizedBox(height: 8),
-        FilledButton.icon(
-          onPressed: () => widget.onOpenTab?.call(1),
-          icon: const Icon(Icons.inbox),
-          label: const Text('Open Inbox (SMS + WhatsApp)'),
-        ),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed: widget.onOpenReply ?? () => widget.onOpenTab?.call(2),
-          icon: const Icon(Icons.reply),
-          label: const Text('Manual reply (template / compose)'),
-        ),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed: () => widget.onOpenSocialLookup?.call(),
-          icon: const Icon(Icons.travel_explore),
-          label: const Text('Social lookup (IG / FB / more)'),
-        ),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed: () {
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const SmsSettingsScreen()),
-            );
-          },
-          icon: const Icon(Icons.settings),
-          label: const Text('SMS settings & Sender ID'),
-        ),
-      ],
+    return _sectionShell(
+      title: 'Work the desk',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          FilledButton.icon(
+            onPressed: () => widget.onOpenTab?.call(1),
+            icon: const Icon(Icons.inbox),
+            label: const Text('Inbox · SMS + WhatsApp'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: widget.onOpenReply ?? () => widget.onOpenTab?.call(2),
+            icon: const Icon(Icons.reply),
+            label: const Text('Reply · template or compose'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () => widget.onOpenSocialLookup?.call(),
+            icon: const Icon(Icons.travel_explore),
+            label: const Text('Social lookup'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const SmsSettingsScreen()),
+              );
+            },
+            icon: const Icon(Icons.settings),
+            label: const Text('SMS settings'),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -540,6 +598,13 @@ class _SenderOption {
           (m['sender_id'] ?? m['name'] ?? m['label'] ?? sid).toString());
       final idType = m['id_type']?.toString().trim();
       if (idType != null && idType.isNotEmpty) label = '$label · $idType';
+      final cfg = m['sms_config'];
+      if (cfg is Map) {
+        final driver = (cfg['driver'] ?? 'inherit').toString().toLowerCase();
+        final usesGlobal = cfg['uses_global_env'] == true || driver == 'inherit';
+        final gate = usesGlobal ? 'env' : driver;
+        label = '$label · SMS:$gate';
+      }
       return _SenderOption(senderId: sid, label: label);
     }
     return null;
