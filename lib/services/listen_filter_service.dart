@@ -2,8 +2,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../shared/portal_sender.dart';
 
-/// Client-side: which portal sender ID(s) this device listens / records under.
-/// Empty set = listen for all (use default bind on server).
+/// Cache of portal filing Sender IDs (read-only on device).
+/// Values come from portal SMS settings via API sync — do not POST from the app.
 class ListenFilterService {
   ListenFilterService._();
   static final ListenFilterService instance = ListenFilterService._();
@@ -16,6 +16,7 @@ class ListenFilterService {
     return raw.map(normalizeOutgoingSenderId).where((s) => s.isNotEmpty).toSet();
   }
 
+  /// Replace local cache from a portal/API sync payload.
   Future<void> setSelected(Iterable<String> ids) async {
     final p = await SharedPreferences.getInstance();
     final cleaned = ids
@@ -27,25 +28,13 @@ class ListenFilterService {
     await p.setStringList(_prefsKey, cleaned);
   }
 
-  Future<void> toggle(String senderId) async {
-    final id = normalizeOutgoingSenderId(senderId);
-    if (id.isEmpty) return;
-    final cur = await getSelected();
-    if (cur.contains(id)) {
-      cur.remove(id);
-    } else {
-      cur.add(id);
-    }
-    await setSelected(cur);
-  }
-
   Future<bool> isListeningFor(String senderId) async {
     final cur = await getSelected();
     if (cur.isEmpty) return true;
     return cur.contains(normalizeOutgoingSenderId(senderId));
   }
 
-  /// Prefer first selected filter; null when unrestricted (server uses bind).
+  /// Prefer first portal filing Sender ID; null when unrestricted (server uses bind).
   Future<String?> primaryListenSenderId() async {
     final cur = await getSelected();
     if (cur.isEmpty) return null;

@@ -52,7 +52,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      ListenKeywordService.instance.refreshFromApi();
+      ListenKeywordService.instance.refreshFromApi(force: true);
       InboundSyncService.instance.flushPending();
       SmsInboundListener.instance.ensureStarted();
       NotificationCaptureService.instance.ensureStarted();

@@ -50,17 +50,19 @@ class SmsInboundListener {
       _readsms!.read();
       _readsms!.smsStream.listen(
         (sms) async {
-          await InboundSyncService.instance.onSmsReceived(
+          final accepted = await InboundSyncService.instance.onSmsReceived(
             sender: sms.sender,
             body: sms.body,
             timeReceived: sms.timeReceived,
           );
-          await ListeningNotification.instance.showListenerIncomingSms(
-            from: sms.sender,
-            bodyPreview: sms.body,
-          );
-          if (!_messageEvents.isClosed) {
-            _messageEvents.add(null);
+          if (accepted) {
+            await ListeningNotification.instance.showListenerIncomingSms(
+              from: sms.sender,
+              bodyPreview: sms.body,
+            );
+            if (!_messageEvents.isClosed) {
+              _messageEvents.add(null);
+            }
           }
         },
         onError: (e) {

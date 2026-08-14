@@ -66,8 +66,18 @@ class _SmsSettingsScreenState extends State<SmsSettingsScreen> {
         _bulk = m['bulk_send_enabled'] != false;
         _portal = m['portal_reply_enabled'] != false;
         _auto = m['auto_reply_enabled'] == true;
-        _keywordEnabled = m['listen_keyword_enabled'] != false;
-        _listenKeyword.text = (m['listen_keyword']?.toString() ?? '').trim();
+        _keywordEnabled = m['listen_keyword_enabled'] == true ||
+            m['listen_keyword_enabled'] == 1 ||
+            m['listen_keyword_enabled'] == '1';
+        final kwList = m['listen_keywords'];
+        if (kwList is List && kwList.isNotEmpty) {
+          _listenKeyword.text =
+              kwList.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).join('\n');
+        } else {
+          _listenKeyword.text = (m['listen_keyword']?.toString() ?? '').trim();
+        }
+        _keywordEnabled =
+            _keywordEnabled && _listenKeyword.text.trim().isNotEmpty;
         final from = m['listen_from_numbers'];
         if (from is List) {
           _fromNumbers.text = from.map((e) => e.toString()).join('\n');
@@ -175,39 +185,59 @@ class _SmsSettingsScreenState extends State<SmsSettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bottom = MediaQuery.paddingOf(context).bottom;
     return Scaffold(
       appBar: AppBar(title: const Text('${VllBranding.appTitle} · SMS settings')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                const Text(
-                  'Listen filters (keyword, From numbers, filing Sender IDs) are managed in '
-                  'imartPortal → SMS settings. This app loads and applies them automatically. '
-                  'Use the fields below for desk toggles and Sender ID registration only.',
-                  style: TextStyle(fontSize: 13, color: Colors.black54),
-                ),
-                const SizedBox(height: 12),
-                _gatewayCard(),
-                const SizedBox(height: 16),
-                _keywordCard(),
-                const SizedBox(height: 16),
-                _senderCard(),
-                const SizedBox(height: 16),
-                _togglesCard(),
-                const SizedBox(height: 16),
-                FilledButton(
-                  style: FilledButton.styleFrom(backgroundColor: AppTheme.lushRed),
-                  onPressed: _saving ? null : _save,
-                  child: Text(_saving ? 'Saving…' : 'Save desk settings'),
-                ),
-              ],
+          : LayoutBuilder(
+              builder: (context, c) {
+                final maxW = c.maxWidth > 720 ? 640.0 : c.maxWidth;
+                return Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: maxW),
+                    child: ListView(
+                      padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottom),
+                      children: [
+                        const Text(
+                          'Listen filters (unique words, From numbers, filing Sender IDs) are managed in '
+                          'imartPortal → SMS settings. This app syncs and applies them automatically. '
+                          'Only matching SMS/WhatsApp appear in Inbox.',
+                          style: TextStyle(fontSize: 13, color: Colors.black54, height: 1.4),
+                        ),
+                        const SizedBox(height: 12),
+                        _gatewayCard(),
+                        const SizedBox(height: 16),
+                        _keywordCard(),
+                        const SizedBox(height: 16),
+                        _senderCard(),
+                        const SizedBox(height: 16),
+                        _togglesCard(),
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                                backgroundColor: AppTheme.lushRed),
+                            onPressed: _saving ? null : _save,
+                            child: Text(_saving ? 'Saving…' : 'Save desk settings'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
     );
   }
 
   Widget _keywordCard() {
+    final keywords = _listenKeyword.text
+        .split(RegExp(r'[\n\r,;|]+'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -221,14 +251,14 @@ class _SmsSettingsScreenState extends State<SmsSettingsScreen> {
                     ?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 6),
             const Text(
-              'Change these in imartPortal → SMS settings. The listener applies them on every SMS/WhatsApp.',
+              'Change these in imartPortal → SMS settings. App applies them to every SMS/WhatsApp.',
               style: TextStyle(fontSize: 12, color: Colors.black54),
             ),
             const SizedBox(height: 10),
             Text(
-              _keywordEnabled
-                  ? 'Keyword: ${_listenKeyword.text.isEmpty ? '(empty)' : _listenKeyword.text}'
-                  : 'Keyword: off',
+              !_keywordEnabled || keywords.isEmpty
+                  ? 'Unique words: off'
+                  : 'Unique words (${keywords.length}): ${keywords.join(' · ')}',
               style: const TextStyle(fontSize: 14),
             ),
             const SizedBox(height: 4),
@@ -255,9 +285,15 @@ class _SmsSettingsScreenState extends State<SmsSettingsScreen> {
               ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
-              onPressed: _loading || _saving ? null : _load,
+              onPressed: _loading || _saving
+                  ? null
+                  : () async {
+                      await ListenKeywordService.instance
+                          .refreshFromApi(force: true);
+                      await _load();
+                    },
               icon: const Icon(Icons.sync),
-              label: const Text('Refresh from portal'),
+              label: const Text('Refresh filters from portal'),
             ),
           ],
         ),

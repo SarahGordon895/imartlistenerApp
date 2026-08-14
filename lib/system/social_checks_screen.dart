@@ -47,7 +47,8 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
     _prefillListener = () {
       final p = SocialChecksScreen.prefillPhone.value;
       if (p == null || p.isEmpty) return;
-      _phone.text = p;
+      final normalized = _normalizePhone(p);
+      _phone.text = normalized.isNotEmpty ? normalized : p.trim();
       SocialChecksScreen.prefillPhone.value = null;
       if (widget.isActive || mounted) {
         _runSingle();
@@ -72,7 +73,8 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
   void _consumePrefill() {
     final p = SocialChecksScreen.prefillPhone.value;
     if (p == null || p.isEmpty) return;
-    _phone.text = p;
+    final normalized = _normalizePhone(p);
+    _phone.text = normalized.isNotEmpty ? normalized : p.trim();
     SocialChecksScreen.prefillPhone.value = null;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _runSingle();
@@ -91,9 +93,12 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
 
   Future<void> _loadRecent() async {
     try {
-      final res = await ApiClient.instance.get(ApiConstants.socialRecentPath, query: {
-        'limit': '100',
-      });
+      final query = <String, String>{'limit': '100'};
+      final phone = _normalizePhone(_phone.text);
+      if (phone.isNotEmpty) {
+        query['phone'] = phone;
+      }
+      final res = await ApiClient.instance.get(ApiConstants.socialRecentPath, query: query);
       ApiClient.ensureHttpAndEnvelopeSuccess(res,
           fallbackPrefix: 'Could not load social checks');
       final data = ApiClient.responseData(res);
@@ -113,11 +118,12 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
   List<String> _selectedPlatforms() => _platforms.toList()..sort();
 
   Future<void> _runSingle() async {
-    final phone = _phone.text.trim();
+    final phone = _normalizePhone(_phone.text);
     if (phone.isEmpty) {
-      showToast('Enter a phone number.', error: true);
+      showToast('Enter a valid phone number from the listened message.', error: true);
       return;
     }
+    _phone.text = phone;
     setState(() => _busy = true);
     try {
       final res = await ApiClient.instance.postJson(ApiConstants.socialCheckPath, {
@@ -132,10 +138,10 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
         await _notifyResults(fresh);
         if (!mounted) return;
         setState(() {
-          _results = [...fresh, ..._results];
+          _results = _mergeByPhonePlatform(fresh, _results);
         });
       }
-      showToast('Social lookup ready — open platform links below.');
+      showToast('Social lookup ready for $phone — open platform links below.');
     } catch (e) {
       showToast(e.toString(), error: true);
     } finally {
@@ -143,14 +149,49 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
     }
   }
 
+  /// Match API MSISDN rules for listened SMS/WhatsApp senders (TZ 07… / 7…).
+  String _normalizePhone(String raw) {
+    var digits = raw.replaceAll(RegExp(r'\D+'), '');
+    if (digits.isEmpty) return '';
+    if (digits.startsWith('00')) digits = digits.substring(2);
+    if (digits.length == 10 && digits.startsWith('0')) {
+      return '255${digits.substring(1)}';
+    }
+    if (digits.length == 9 && (digits.startsWith('6') || digits.startsWith('7'))) {
+      return '255$digits';
+    }
+    if (RegExp(r'^(255|254|256)').hasMatch(digits) &&
+        digits.length >= 12 &&
+        digits.length <= 15) {
+      return digits;
+    }
+    if (digits.length >= 10 && digits.length <= 15) return digits;
+    return '';
+  }
+
+  List<Map<String, dynamic>> _mergeByPhonePlatform(
+    List<Map<String, dynamic>> fresh,
+    List<Map<String, dynamic>> existing,
+  ) {
+    final keys = <String>{};
+    for (final r in fresh) {
+      keys.add('${r['phone_number']}|${r['platform']}');
+    }
+    final kept = existing.where((r) {
+      final k = '${r['phone_number']}|${r['platform']}';
+      return !keys.contains(k);
+    });
+    return [...fresh, ...kept];
+  }
+
   Future<void> _runBatch() async {
     final lines = _batch.text
         .split(RegExp(r'[\n,; ]+'))
-        .map((e) => e.trim())
+        .map((e) => _normalizePhone(e))
         .where((e) => e.isNotEmpty)
         .toList();
     if (lines.isEmpty) {
-      showToast('Enter numbers for batch check.', error: true);
+      showToast('Enter valid numbers for batch check.', error: true);
       return;
     }
     setState(() => _busy = true);
@@ -167,7 +208,7 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
         await _notifyResults(fresh);
         if (!mounted) return;
         setState(() {
-          _results = [...fresh, ..._results];
+          _results = _mergeByPhonePlatform(fresh, _results);
         });
       }
       showToast('Batch social lookup submitted.');
@@ -179,21 +220,29 @@ class _SocialChecksScreenState extends State<SocialChecksScreen> {
   }
 
   Future<void> _notifyResults(List<Map<String, dynamic>> rows) async {
-    for (final r in rows) {
-      final status = (r['status'] ?? '').toString();
-      if (status == 'found' || status == 'provider_error') {
-        final platform = (r['platform'] ?? '').toString();
-        final phone = (r['phone_number'] ?? '').toString();
-        final title = status == 'found'
-            ? 'Social match detected'
-            : 'Social check provider error';
-        final body = '$platform • $phone • $status';
-        await ListeningNotification.instance.showSocialActivity(
-          title: title,
-          body: body,
-        );
-      }
+    if (rows.isEmpty) return;
+    final phone = (rows.first['phone_number'] ?? '').toString();
+    final platforms = rows.map((r) => (r['platform'] ?? '').toString()).where((p) => p.isNotEmpty).toSet();
+    final found = rows.where((r) => (r['status'] ?? '') == 'found').length;
+    final ready = rows.where((r) => (r['status'] ?? '') == 'search_ready').length;
+    final errors = rows.where((r) => (r['status'] ?? '') == 'provider_error').length;
+
+    String title;
+    String body;
+    if (found > 0) {
+      title = 'Social match detected';
+      body = '$phone · $found platform match(es)';
+    } else if (errors > 0 && ready == 0) {
+      title = 'Social check provider error';
+      body = '$phone · $errors error(s)';
+    } else {
+      title = 'Social lookup ready';
+      body = '$phone · open ${platforms.join(', ')}';
     }
+    await ListeningNotification.instance.showSocialActivity(
+      title: title,
+      body: body,
+    );
   }
 
   Future<void> _openUrl(String raw) async {

@@ -5,7 +5,8 @@ import '../shared/constants.dart';
 import '../shared/portal_sender.dart';
 import 'listen_filter_service.dart';
 
-/// Portal-managed listen rules cached for on-device filtering (keyword OR from-numbers).
+/// Portal-managed listen rules cached for on-device filtering.
+/// Keyword(s) OR From-numbers (same as API `ClientSmsPref::evaluateListenFilter`).
 class ListenKeywordService {
   ListenKeywordService._();
   static final ListenKeywordService instance = ListenKeywordService._();
@@ -13,11 +14,41 @@ class ListenKeywordService {
   static const _keyKeyword = 'imart_listen_keyword';
   static const _keyEnabled = 'imart_listen_keyword_enabled';
   static const _keyFromNumbers = 'imart_listen_from_numbers';
+  static const _keyLastSyncMs = 'imart_listen_last_sync_ms';
+
+  /// Avoid refreshing from API on every SMS (portal sync on login/resume/periodic).
+  static const Duration minRefreshInterval = Duration(seconds: 45);
+
+  DateTime? _lastRefreshAt;
+
+  List<String> parseKeywords(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return const [];
+    final out = <String>{};
+    for (final part in raw.split(RegExp(r'[\n\r,;|]+'))) {
+      final k = part.trim();
+      if (k.isNotEmpty) out.add(k);
+    }
+    return out.toList();
+  }
 
   Future<void> cacheFromPrefsMap(Map<String, dynamic> prefs) async {
-    final keyword = (prefs['listen_keyword']?.toString() ?? '').trim();
-    final enabledRaw = prefs['listen_keyword_enabled'] != false;
+    final keywordsList = <String>[];
+    final rawList = prefs['listen_keywords'];
+    if (rawList is List) {
+      for (final e in rawList) {
+        final k = e.toString().trim();
+        if (k.isNotEmpty) keywordsList.add(k);
+      }
+    }
+    if (keywordsList.isEmpty) {
+      keywordsList.addAll(parseKeywords(prefs['listen_keyword']?.toString()));
+    }
+    final keyword = keywordsList.join('\n');
+    final enabledRaw = prefs['listen_keyword_enabled'] == true ||
+        prefs['listen_keyword_enabled'] == 1 ||
+        prefs['listen_keyword_enabled'] == '1';
     final enabled = enabledRaw && keyword.isNotEmpty;
+
     final fromRaw = prefs['listen_from_numbers'];
     final fromList = <String>[];
     if (fromRaw is List) {
@@ -36,6 +67,8 @@ class ListenKeywordService {
     await p.setString(_keyKeyword, keyword);
     await p.setBool(_keyEnabled, enabled);
     await p.setStringList(_keyFromNumbers, fromList.toSet().toList());
+    await p.setInt(_keyLastSyncMs, DateTime.now().millisecondsSinceEpoch);
+    _lastRefreshAt = DateTime.now();
 
     final senderIds = prefs['listen_sender_ids'];
     if (senderIds is List) {
@@ -45,7 +78,12 @@ class ListenKeywordService {
     }
   }
 
-  Future<void> refreshFromApi() async {
+  Future<void> refreshFromApi({bool force = false}) async {
+    if (!force && _lastRefreshAt != null) {
+      if (DateTime.now().difference(_lastRefreshAt!) < minRefreshInterval) {
+        return;
+      }
+    }
     try {
       final res =
           await ApiClient.instance.get(ApiConstants.replyTemplatesPrefsPath);
@@ -54,7 +92,6 @@ class ListenKeywordService {
       if (data is Map) {
         await cacheFromPrefsMap(Map<String, dynamic>.from(data));
       }
-      // Also pull dedicated listen-filters endpoint (portal may update only that table).
       final lf = await ApiClient.instance.get(ApiConstants.listenFiltersPath);
       if (lf.statusCode >= 200 && lf.statusCode < 300) {
         final d = ApiClient.responseData(lf);
@@ -67,17 +104,19 @@ class ListenKeywordService {
           }
         }
       }
+      _lastRefreshAt = DateTime.now();
     } catch (_) {
       // Keep last cached values when offline.
     }
   }
 
-  Future<({String keyword, bool enabled, List<String> fromNumbers})>
+  Future<({List<String> keywords, bool enabled, List<String> fromNumbers})>
       current() async {
     final p = await SharedPreferences.getInstance();
+    final keywords = parseKeywords(p.getString(_keyKeyword));
     return (
-      keyword: (p.getString(_keyKeyword) ?? '').trim(),
-      enabled: p.getBool(_keyEnabled) ?? false,
+      keywords: keywords,
+      enabled: (p.getBool(_keyEnabled) ?? false) && keywords.isNotEmpty,
       fromNumbers: p.getStringList(_keyFromNumbers) ?? const <String>[],
     );
   }
@@ -88,9 +127,20 @@ class ListenKeywordService {
     if (from.isEmpty) return false;
     for (final a in allowed) {
       if (from == a) return true;
-      if (from.length >= 9 && a.length >= 9 && from.substring(from.length - 9) == a.substring(a.length - 9)) {
+      if (from.length >= 9 &&
+          a.length >= 9 &&
+          from.substring(from.length - 9) == a.substring(a.length - 9)) {
         return true;
       }
+    }
+    return false;
+  }
+
+  bool _keywordMatches(String body, List<String> keywords) {
+    if (keywords.isEmpty) return false;
+    final hay = body.toLowerCase();
+    for (final k in keywords) {
+      if (hay.contains(k.toLowerCase())) return true;
     }
     return false;
   }
@@ -102,13 +152,11 @@ class ListenKeywordService {
   }) async {
     final cur = await current();
     final hasFrom = cur.fromNumbers.isNotEmpty;
-    // Empty keyword must never block all captures.
-    final hasKeywordRule = cur.enabled && cur.keyword.isNotEmpty;
+    final hasKeywordRule = cur.enabled && cur.keywords.isNotEmpty;
 
     if (!hasKeywordRule && !hasFrom) return true;
 
-    final kwMatch = hasKeywordRule &&
-        body.toLowerCase().contains(cur.keyword.toLowerCase());
+    final kwMatch = hasKeywordRule && _keywordMatches(body, cur.keywords);
     final fromMatch = hasFrom && _fromMatches(sender, cur.fromNumbers);
 
     if (hasKeywordRule && hasFrom) {

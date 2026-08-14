@@ -111,7 +111,7 @@ class _DashboardTabState extends State<DashboardTab> {
     if (!mounted) return;
     setState(() {
       _listenFilters = selected;
-      _listenKeyword = cur.keyword;
+      _listenKeyword = cur.keywords.join(', ');
       _listenKeywordEnabled = cur.enabled;
       _listenFromNumbers = List<String>.from(cur.fromNumbers);
     });
@@ -511,8 +511,8 @@ class _DashboardTabState extends State<DashboardTab> {
             const SizedBox(height: 6),
             Text(
               _listenKeywordEnabled
-                  ? 'Keyword · $_listenKeyword'
-                  : 'Keyword · off (accept all / From rules)',
+                  ? 'Unique words · $_listenKeyword'
+                  : 'Unique words · off (accept all / From rules)',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             Text(

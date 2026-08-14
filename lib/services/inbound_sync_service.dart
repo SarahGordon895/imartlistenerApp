@@ -14,20 +14,27 @@ class InboundSyncService {
   static final InboundSyncService instance = InboundSyncService._();
 
   Timer? _timer;
+  Timer? _prefsTimer;
 
   void startPeriodicRetry() {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 45), (_) {
       flushPending();
     });
+    _prefsTimer?.cancel();
+    _prefsTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      ListenKeywordService.instance.refreshFromApi();
+    });
   }
 
   void stopPeriodicRetry() {
     _timer?.cancel();
     _timer = null;
+    _prefsTimer?.cancel();
+    _prefsTimer = null;
   }
 
-  Future<void> onSmsReceived({
+  Future<bool> onSmsReceived({
     required String sender,
     required String body,
     required DateTime timeReceived,
@@ -40,25 +47,20 @@ class InboundSyncService {
     );
   }
 
-  Future<void> onMessageReceived({
+  /// Returns true when the message was accepted by portal listen filters and queued.
+  Future<bool> onMessageReceived({
     required String sender,
     required String body,
     required DateTime timeReceived,
     String channel = 'sms',
     String? contactName,
   }) async {
-    // Portal is source of truth — refresh before applying (short timeout if offline).
-    try {
-      await ListenKeywordService.instance
-          .refreshFromApi()
-          .timeout(const Duration(seconds: 3));
-    } catch (_) {}
-
+    // Use cached portal filters on the hot path (refresh on login/resume/periodic).
     if (!await ListenKeywordService.instance.messageShouldListen(
       body: body,
       sender: sender,
     )) {
-      return;
+      return false;
     }
 
     final rowId = await LocalDatabase.instance.insertInbound(
@@ -69,6 +71,7 @@ class InboundSyncService {
       contactName: contactName,
     );
     await _syncRow(rowId);
+    return true;
   }
 
   Future<void> flushPending() async {

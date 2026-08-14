@@ -71,19 +71,21 @@ class NotificationCaptureService {
           // SMS is already captured via readsms; avoid double posts from SMS apps.
           if (channel == 'sms') return;
 
-          await InboundSyncService.instance.onMessageReceived(
+          final accepted = await InboundSyncService.instance.onMessageReceived(
             sender: sender.isNotEmpty ? sender : (name ?? 'whatsapp'),
             body: body,
             timeReceived: dt,
             channel: 'whatsapp',
             contactName: name,
           );
-          await ListeningNotification.instance.showListenerIncomingSms(
-            from: name?.isNotEmpty == true ? name! : sender,
-            bodyPreview: body,
-          );
-          if (!_messageEvents.isClosed) {
-            _messageEvents.add(null);
+          if (accepted) {
+            await ListeningNotification.instance.showListenerIncomingSms(
+              from: name?.isNotEmpty == true ? name! : sender,
+              bodyPreview: body,
+            );
+            if (!_messageEvents.isClosed) {
+              _messageEvents.add(null);
+            }
           }
         } catch (e) {
           _lastError = e.toString();
